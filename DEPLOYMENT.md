@@ -196,7 +196,7 @@ python run_userbot.py
 
 #### Шаг 12: Создайте systemd сервисы
 
-##### Control Bot сервис:
+##### Control Bot сервис
 
 ```bash
 sudo nano /etc/systemd/system/getlead-bot.service
@@ -227,7 +227,7 @@ CPUQuota=50%
 WantedBy=multi-user.target
 ```
 
-##### Userbot сервис:
+##### Userbot сервис
 
 ```bash
 sudo nano /etc/systemd/system/getlead-userbot.service
@@ -292,7 +292,7 @@ sudo ufw enable
 sudo nano /etc/logrotate.d/getlead
 ```
 
-```
+```text
 /var/log/getlead/*.log {
     daily
     rotate 7
@@ -306,7 +306,7 @@ sudo nano /etc/logrotate.d/getlead
 
 ### 📊 Мониторинг и управление
 
-#### Просмотр логов:
+#### Просмотр логов
 
 ```bash
 # Логи бота
@@ -322,7 +322,7 @@ sudo journalctl -u getlead-bot -n 100
 sudo journalctl -u getlead-bot --since today
 ```
 
-#### Перезапуск сервисов:
+#### Перезапуск сервисов
 
 ```bash
 sudo systemctl restart getlead-bot
