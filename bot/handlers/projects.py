@@ -31,7 +31,8 @@ async def show_projects_menu(callback: CallbackQuery, user: User):
     
     await callback.message.edit_text(
         text,
-        reply_markup=projects_menu_kb(projects, user.language)
+        reply_markup=projects_menu_kb(projects, user.language),
+        parse_mode='HTML'
     )
     await callback.answer()
 
@@ -106,7 +107,7 @@ async def start_delete_project(callback: CallbackQuery, user: User, state: FSMCo
     await state.update_data(project_id=active_project.id)
     
     text = f'⚠️ Вы уверены, что хотите удалить проект "<b>{active_project.name}</b>"?\n\nНапишите "Да" для подтверждения'
-    await callback.message.answer(text, reply_markup=cancel_kb(user.language))
+    await callback.message.answer(text, reply_markup=cancel_kb(user.language), parse_mode='HTML')
     await callback.answer()
 
 

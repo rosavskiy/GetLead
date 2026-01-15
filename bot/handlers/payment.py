@@ -47,7 +47,8 @@ async def show_payment_menu(callback: CallbackQuery, user: User):
     
     await callback.message.edit_text(
         text,
-        reply_markup=payment_menu_kb(user.subscription_plan, user.language)
+        reply_markup=payment_menu_kb(user.subscription_plan, user.language),
+        parse_mode='HTML'
     )
     await callback.answer()
 
@@ -68,7 +69,8 @@ async def select_payment_plan(callback: CallbackQuery, user: User):
     
     await callback.message.edit_text(
         text,
-        reply_markup=payment_method_kb(plan, user.language)
+        reply_markup=payment_method_kb(plan, user.language),
+        parse_mode='HTML'
     )
     await callback.answer()
 
@@ -85,7 +87,7 @@ async def process_card_payment(callback: CallbackQuery, user: User):
 
 Для оплаты свяжитесь с поддержкой: @getlead_support"""
     
-    await callback.message.edit_text(text, reply_markup=back_to_main_kb(user.language))
+    await callback.message.edit_text(text, reply_markup=back_to_main_kb(user.language), parse_mode='HTML')
     await callback.answer()
 
 
@@ -101,5 +103,5 @@ async def process_crypto_payment(callback: CallbackQuery, user: User):
 
 Для оплаты свяжитесь с поддержкой: @getlead_support"""
     
-    await callback.message.edit_text(text, reply_markup=back_to_main_kb(user.language))
+    await callback.message.edit_text(text, reply_markup=back_to_main_kb(user.language), parse_mode='HTML')
     await callback.answer()

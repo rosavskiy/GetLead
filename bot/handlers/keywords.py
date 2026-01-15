@@ -39,7 +39,8 @@ async def show_keywords_menu(callback: CallbackQuery, user: User):
     
     await callback.message.edit_text(
         text,
-        reply_markup=keywords_menu_kb(bool(keywords), user.language)
+        reply_markup=keywords_menu_kb(bool(keywords), user.language),
+        parse_mode='HTML'
     )
     await callback.answer()
 
@@ -156,7 +157,8 @@ async def show_exclude_menu(callback: CallbackQuery, user: User):
     
     await callback.message.edit_text(
         text,
-        reply_markup=exclude_menu_kb(bool(keywords), user.language)
+        reply_markup=exclude_menu_kb(bool(keywords), user.language),
+        parse_mode='HTML'
     )
     await callback.answer()
 

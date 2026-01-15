@@ -38,7 +38,8 @@ async def show_chats_menu(callback: CallbackQuery, user: User):
     
     await callback.message.edit_text(
         text,
-        reply_markup=chats_menu_kb(user.language)
+        reply_markup=chats_menu_kb(user.language),
+        parse_mode='HTML'
     )
     await callback.answer()
 
@@ -122,7 +123,7 @@ async def list_chats(callback: CallbackQuery, user: User):
         text += f'   {status}\n'
         text += f'   {chat.telegram_link}\n\n'
     
-    await callback.message.answer(text)
+    await callback.message.answer(text, parse_mode='HTML')
     await callback.answer()
 
 
@@ -142,7 +143,7 @@ async def show_packed_chats(callback: CallbackQuery, user: User):
 
 📢 Чтобы добавить пакет, напишите в поддержку: /support"""
     
-    await callback.message.answer(text)
+    await callback.message.answer(text, parse_mode='HTML')
     await callback.answer()
 
 
