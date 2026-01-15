@@ -34,10 +34,9 @@ class MatchingEngine:
         for keyword in keywords:
             normalized_keyword = keyword.text.lower()
             
-            # Проверяем наличие слова в тексте
-            # Используем word boundaries для точного поиска слов
-            pattern = r'\b' + re.escape(normalized_keyword) + r'\b'
-            if re.search(pattern, normalized_text):
+            # Проверяем наличие слова в тексте (частичное совпадение)
+            # Ищем подстроку без strict word boundaries для поддержки склонений
+            if normalized_keyword in normalized_text:
                 found_keywords.append(keyword)
         
         return found_keywords
@@ -58,9 +57,9 @@ class MatchingEngine:
         
         for word in exclude_words:
             normalized_word = word.text.lower()
-            pattern = r'\b' + re.escape(normalized_word) + r'\b'
             
-            if re.search(pattern, normalized_text):
+            # Частичное совпадение для исключающих слов
+            if normalized_word in normalized_text:
                 return True  # Найдено исключающее слово
         
         return False

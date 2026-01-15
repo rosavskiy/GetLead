@@ -140,6 +140,7 @@ class UserbotWorker:
             # Проверяем, что сообщение из мониторируемого чата
             chat_id = event.chat_id
             if chat_id not in self.monitored_chats:
+                logger.debug(f"Сообщение из чата {chat_id} не мониторится (мониторим: {self.monitored_chats})")
                 return
             
             # Получаем текст сообщения
@@ -150,6 +151,8 @@ class UserbotWorker:
             # Игнорируем свои сообщения
             if event.message.out:
                 return
+            
+            logger.info(f"📨 Новое сообщение в чате {chat_id}: {text[:50]}...")
             
             # Получаем все проекты, которые мониторят этот чат
             async with async_session_maker() as session:
