@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from database.models import User, Project, Keyword, Filter, Chat, KeywordType, SubscriptionPlan
+from userbot.load_balancer import UserbotLoadBalancer
 
 
 class UserCRUD:
@@ -153,6 +154,9 @@ class ChatCRUD:
             session.add(chat)
             await session.commit()
             await session.refresh(chat)
+            
+            # Автоматически назначаем юзербот для нового чата
+            await UserbotLoadBalancer.assign_userbot_for_chat(session, chat.id)
         
         return chat
     

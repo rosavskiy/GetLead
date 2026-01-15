@@ -33,6 +33,11 @@ class Settings(BaseSettings):
     USERBOT_2_PHONE: str = ""
     USERBOT_2_SESSION_NAME: str = "userbot_2"
     
+    USERBOT_3_API_ID: int = 0
+    USERBOT_3_API_HASH: str = ""
+    USERBOT_3_PHONE: str = ""
+    USERBOT_3_SESSION_NAME: str = "userbot_3"
+    
     # OpenAI
     OPENAI_API_KEY: str = ""
     
@@ -73,6 +78,14 @@ class Settings(BaseSettings):
                 'api_hash': self.USERBOT_2_API_HASH,
                 'phone': self.USERBOT_2_PHONE,
                 'session_name': self.USERBOT_2_SESSION_NAME
+            })
+        
+        if self.USERBOT_3_API_ID:
+            bots.append({
+                'api_id': self.USERBOT_3_API_ID,
+                'api_hash': self.USERBOT_3_API_HASH,
+                'phone': self.USERBOT_3_PHONE,
+                'session_name': self.USERBOT_3_SESSION_NAME
             })
         
         return bots

@@ -1,0 +1,22 @@
+[Unit]
+Description=GetLead Auto-Update Webhook Service
+After=network.target
+
+[Service]
+Type=simple
+User=getlead
+WorkingDirectory=/home/getlead/getlead
+Environment="PATH=/home/getlead/getlead/venv/bin"
+Environment="GITHUB_WEBHOOK_SECRET=your-secret-key-change-this"
+ExecStart=/home/getlead/getlead/venv/bin/python webhook_update.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+# Ограничения ресурсов
+MemoryMax=256M
+CPUQuota=25%
+
+[Install]
+WantedBy=multi-user.target
