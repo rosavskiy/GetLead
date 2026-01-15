@@ -888,4 +888,4 @@ sudo nano /etc/postgresql/15/main/pg_hba.conf
 Если возникли проблемы:
 1. Проверьте логи: `sudo journalctl -u getlead-bot -f`
 2. Убедитесь, что все переменные окружения заполнены
-3. Обратитесь в поддержку: support@getlead.bot
+3. Обратитесь в поддержку: <support@getlead.bot>
