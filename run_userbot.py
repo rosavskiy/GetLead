@@ -32,7 +32,9 @@ async def main():
     logger.info(f"Запуск {len(workers)} юзерботов...")
     
     # Запускаем всех воркеров параллельно
-    await asyncio.gather(*[worker.start() for worker in workers])
+    # Используем gather с return_exceptions=True для обработки ошибок
+    tasks = [worker.start() for worker in workers]
+    await asyncio.gather(*tasks, return_exceptions=True)
 
 
 if __name__ == '__main__':
