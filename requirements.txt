@@ -10,6 +10,7 @@ pyrogram==2.0.106
 sqlalchemy>=2.0.25
 asyncpg>=0.30.0
 alembic>=1.13.1
+greenlet>=3.0.0  # Required for SQLAlchemy async support
 
 # Task Queue
 redis==5.0.1
