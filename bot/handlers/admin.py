@@ -27,12 +27,12 @@ async def admin_stats(message: Message):
             await message.answer("⚠️ Нет настроенных юзерботов")
             return
         
-        text = "📊 **Статистика юзерботов:**\n\n"
+        text = "📊 <b>Статистика юзерботов:</b>\n\n"
         
         for bot in stats:
             status_emoji = "🟢" if not bot['is_overloaded'] else "🔴"
-            text += f"{status_emoji} **{bot['session_name']}**\n"
-            text += f"   📱 Телефон: `{bot['phone']}`\n"
+            text += f"{status_emoji} <b>{bot['session_name']}</b>\n"
+            text += f"   📱 Телефон: <code>{bot['phone']}</code>\n"
             text += f"   💬 Чатов: {bot['total_chats']}/{UserbotLoadBalancer.MAX_CHATS_PER_USERBOT}\n"
             text += f"   👥 Пользователей: {bot['active_users']}\n"
             text += f"   📈 Загрузка: {bot['load_percent']:.1f}%\n\n"
@@ -42,13 +42,13 @@ async def admin_stats(message: Message):
         total_users = sum(b['active_users'] for b in stats)
         avg_load = sum(b['load_percent'] for b in stats) / len(stats)
         
-        text += "📈 **Общая статистика:**\n"
+        text += "📈 <b>Общая статистика:</b>\n"
         text += f"   Всего юзерботов: {len(stats)}\n"
         text += f"   Всего чатов: {total_chats}\n"
         text += f"   Всего пользователей: {total_users}\n"
         text += f"   Средняя загрузка: {avg_load:.1f}%\n"
         
-        await message.answer(text, parse_mode="Markdown")
+        await message.answer(text, parse_mode="HTML")
 
 
 @router.message(Command("admin_rebalance"))
@@ -75,8 +75,8 @@ async def admin_limits(message: Message):
         await message.answer("❌ Доступ запрещен")
         return
     
-    text = "⚙️ **Текущие лимиты системы:**\n\n"
-    text += f"📊 **Юзерботы:**\n"
+    text = "⚙️ <b>Текущие лимиты системы:</b>\n\n"
+    text += f"📊 <b>Юзерботы:</b>\n"
     text += f"   Макс. чатов на юзербот: {UserbotLoadBalancer.MAX_CHATS_PER_USERBOT}\n"
     text += f"   Макс. пользователей на юзербот: {UserbotLoadBalancer.MAX_USERS_PER_USERBOT}\n\n"
     
@@ -85,9 +85,9 @@ async def admin_limits(message: Message):
     text += f"   Теоретическая емкость: {len(userbots) * UserbotLoadBalancer.MAX_CHATS_PER_USERBOT} чатов\n"
     text += f"   Теоретически клиентов: ~{len(userbots) * UserbotLoadBalancer.MAX_USERS_PER_USERBOT}\n\n"
     
-    text += "💡 **Рекомендации:**\n"
+    text += "💡 <b>Рекомендации:</b>\n"
     text += "   • 1 юзербот = до 20 клиентов\n"
-    text += "   • При загрузке >80% добавьте юзерботов\n"
+    text += "   • При загрузке &gt;80% добавьте юзерботов\n"
     text += "   • Используйте /admin_rebalance для оптимизации\n"
     
-    await message.answer(text, parse_mode="Markdown")
+    await message.answer(text, parse_mode="HTML")
