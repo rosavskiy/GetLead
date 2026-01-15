@@ -137,22 +137,27 @@ class UserbotWorker:
     async def process_message(self, event):
         """Обработка нового сообщения"""
         try:
-            # Проверяем, что сообщение из мониторируемого чата
             chat_id = event.chat_id
+            logger.info(f"🔔 Событие NewMessage: chat_id={chat_id}, monitored={chat_id in self.monitored_chats}")
+            
+            # Проверяем, что сообщение из мониторируемого чата
             if chat_id not in self.monitored_chats:
-                logger.debug(f"Сообщение из чата {chat_id} не мониторится (мониторим: {self.monitored_chats})")
+                logger.debug(f"❌ Чат {chat_id} не мониторится. Список: {self.monitored_chats}")
                 return
             
             # Получаем текст сообщения
             text = event.message.message
             if not text:
+                logger.debug(f"⚠️ Сообщение без текста в чате {chat_id}")
                 return
             
             # Игнорируем свои сообщения
-            if event.message.out:
-                return
+            is_outgoing = event.message.out
+            logger.info(f"📨 Сообщение в чате {chat_id}: '{text[:50]}...', out={is_outgoing}")
             
-            logger.info(f"📨 Новое сообщение в чате {chat_id}: {text[:50]}...")
+            if is_outgoing:
+                logger.info(f"⏭️ Пропускаем свое сообщение")
+                return
             
             # Получаем все проекты, которые мониторят этот чат
             async with async_session_maker() as session:
