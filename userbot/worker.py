@@ -54,8 +54,20 @@ class UserbotWorker:
         async def handle_new_message(event):
             await self.process_message(event)
         
+        # Запускаем фоновую задачу проверки новых чатов
+        asyncio.create_task(self.check_new_chats_periodically())
+        
         # Запускаем клиента
         await self.client.run_until_disconnected()
+    
+    async def check_new_chats_periodically(self):
+        """Периодическая проверка новых чатов (каждые 60 секунд)"""
+        while True:
+            try:
+                await asyncio.sleep(60)  # Проверяем раз в минуту
+                await self.load_chats()
+            except Exception as e:
+                logger.error(f"❌ Ошибка периодической проверки чатов: {e}")
     
     async def load_chats(self):
         """Загрузка чатов для мониторинга"""
@@ -73,9 +85,13 @@ class UserbotWorker:
                     # Пытаемся вступить в чат (если еще не вступили)
                     if not chat.is_joined:
                         await self.join_chat(chat)
-                    
-                    self.monitored_chats.add(chat.telegram_id)
-                    logger.info(f"✅ Мониторинг чата: {chat.telegram_link}")
+                        # Добавляем в список мониторинга после успешного вступления
+                        if chat.telegram_id:
+                            self.monitored_chats.add(chat.telegram_id)
+                    elif chat.telegram_id and chat.telegram_id not in self.monitored_chats:
+                        # Чат уже подключен, но не в списке мониторинга
+                        self.monitored_chats.add(chat.telegram_id)
+                        logger.info(f"✅ Мониторинг чата: {chat.telegram_link}")
                     
                 except Exception as e:
                     logger.error(f"❌ Ошибка загрузки чата {chat.telegram_link}: {e}")
