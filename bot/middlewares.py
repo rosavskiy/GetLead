@@ -25,11 +25,6 @@ class SubscriptionMiddleware(BaseMiddleware):
     ) -> Any:
         """Проверка подписки"""
         
-        # Проверяем, является ли пользователь администратором
-        if event.from_user.id in settings.admin_ids_list:
-            # Админы имеют полный доступ без проверки подписки
-            return await handler(event, data)
-        
         # Получаем пользователя
         async with async_session_maker() as session:
             user = await UserCRUD.get_or_create(
@@ -40,6 +35,11 @@ class SubscriptionMiddleware(BaseMiddleware):
             
             # Сохраняем пользователя в данных для использования в хендлерах
             data['user'] = user
+            
+            # Проверяем, является ли пользователь администратором
+            if event.from_user.id in settings.admin_ids_list:
+                # Админы имеют полный доступ без проверки подписки
+                return await handler(event, data)
             
             # Проверяем, является ли это бесплатной командой
             command_text = ''
