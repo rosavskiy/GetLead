@@ -17,7 +17,7 @@ async def cmd_start(message: Message, user: User, state: FSMContext):
     await state.clear()
     
     text = get_text('start', user.language)
-    await message.answer(text, reply_markup=main_menu_kb(user.language))
+    await message.answer(text, reply_markup=main_menu_kb(user.language), parse_mode='HTML')
 
 
 @router.callback_query(F.data == 'menu:main')
@@ -26,7 +26,7 @@ async def show_main_menu(callback: CallbackQuery, user: User, state: FSMContext)
     await state.clear()
     
     text = get_text('main_menu', user.language)
-    await callback.message.edit_text(text, reply_markup=main_menu_kb(user.language))
+    await callback.message.edit_text(text, reply_markup=main_menu_kb(user.language), parse_mode='HTML')
     await callback.answer()
 
 
@@ -59,7 +59,7 @@ async def show_help(callback: CallbackQuery, user: User):
 
 📹 Видео-инструкция: /video"""
     
-    await callback.message.edit_text(text, reply_markup=back_to_main_kb(user.language))
+    await callback.message.edit_text(text, reply_markup=back_to_main_kb(user.language), parse_mode='HTML')
     await callback.answer()
 
 
@@ -74,5 +74,5 @@ async def show_support(callback: CallbackQuery, user: User):
 
 Мы ответим в течение 24 часов!"""
     
-    await callback.message.edit_text(text, reply_markup=back_to_main_kb(user.language))
+    await callback.message.edit_text(text, reply_markup=back_to_main_kb(user.language), parse_mode='HTML')
     await callback.answer()
