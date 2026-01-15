@@ -120,27 +120,27 @@ fi
 log "Перезапуск сервисов..."
 
 # Останавливаем сервисы
-sudo systemctl stop getlead-userbot
-sudo systemctl stop getlead-bot
+systemctl stop getlead-userbot
+systemctl stop getlead-bot
 
 # Ждём завершения процессов
 sleep 3
 
 # Запускаем сервисы
-sudo systemctl start getlead-bot
-sudo systemctl start getlead-userbot
+systemctl start getlead-bot
+systemctl start getlead-userbot
 
 # Проверяем статус
 sleep 2
 
-if sudo systemctl is-active --quiet getlead-bot; then
+if systemctl is-active --quiet getlead-bot; then
     log "✅ getlead-bot успешно запущен"
 else
     error "❌ getlead-bot не запустился! Проверьте логи: journalctl -u getlead-bot -n 50"
     exit 1
 fi
 
-if sudo systemctl is-active --quiet getlead-userbot; then
+if systemctl is-active --quiet getlead-userbot; then
     log "✅ getlead-userbot успешно запущен"
 else
     error "❌ getlead-userbot не запустился! Проверьте логи: journalctl -u getlead-userbot -n 50"
@@ -175,5 +175,5 @@ log "=========================================="
 log "Версия: $(git log -1 --pretty=format:'%h - %s (%ar)')"
 log ""
 log "Для просмотра логов:"
-log "  Bot: sudo journalctl -u getlead-bot -f"
-log "  Userbot: sudo journalctl -u getlead-userbot -f"
+log "  Bot: journalctl -u getlead-bot -f"
+log "  Userbot: journalctl -u getlead-userbot -f"
