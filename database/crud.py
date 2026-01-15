@@ -1,5 +1,6 @@
 """CRUD операции для работы с базой данных"""
 from typing import List, Optional
+from datetime import datetime
 from sqlalchemy import select, update, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
