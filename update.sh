@@ -14,7 +14,7 @@ YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
 # Конфигурация
-PROJECT_DIR="/home/getlead/getlead"
+PROJECT_DIR="/home/getlead"
 BACKUP_DIR="/home/getlead/backups"
 LOG_FILE="/home/getlead/update.log"
 

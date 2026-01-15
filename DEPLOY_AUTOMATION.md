@@ -7,7 +7,7 @@
 Запустите скрипт на сервере:
 
 ```bash
-cd /home/getlead/getlead
+cd /home/getlead
 ./update.sh
 ```
 
