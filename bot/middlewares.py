@@ -4,6 +4,7 @@ from datetime import datetime
 from aiogram import BaseMiddleware
 from aiogram.types import Message, CallbackQuery
 
+from config import settings
 from database.database import async_session_maker
 from database.crud import UserCRUD
 from database.models import SubscriptionPlan
@@ -23,6 +24,11 @@ class SubscriptionMiddleware(BaseMiddleware):
         data: Dict[str, Any]
     ) -> Any:
         """Проверка подписки"""
+        
+        # Проверяем, является ли пользователь администратором
+        if event.from_user.id in settings.admin_ids_list:
+            # Админы имеют полный доступ без проверки подписки
+            return await handler(event, data)
         
         # Получаем пользователя
         async with async_session_maker() as session:
