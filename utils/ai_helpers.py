@@ -1,9 +1,12 @@
 """Утилиты для работы с AI"""
 import aiohttp
 import re
+import logging
 from openai import AsyncOpenAI
 from typing import List, Optional
 from config import settings
+
+logger = logging.getLogger(__name__)
 
 client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY) if settings.OPENAI_API_KEY else None
 
@@ -69,6 +72,17 @@ CHAT_DATABASE = {
         '@hr_chat_ru', '@rabota_chat', '@vacancy_chat',
         '@headhunter_chat', '@recruiting_ru', '@hh_chat',
     ],
+    'travel': [
+        '@travel_chat_ru', '@visa_help', '@immigranty_chat',
+        '@relocation_chat', '@expats_ru', '@tourism_chat',
+        '@emigration_ru', '@work_abroad', '@europe_visa',
+        '@usa_visa_chat', '@canada_immigration',
+    ],
+    'services': [
+        '@uslugi_chat', '@master_chat', '@repair_chat',
+        '@cleaning_chat', '@beauty_masters', '@photo_video_chat',
+        '@event_chat', '@wedding_chat', '@catering_chat',
+    ],
 }
 
 # Маппинг ниш на категории
@@ -90,6 +104,10 @@ NICHE_KEYWORDS = {
     'freelance': ['фриланс', 'заказы', 'удаленка', 'удалённая', 'проекты', 'подработка'],
     'legal': ['юрист', 'право', 'бухгалтер', 'налог', 'юридический', 'accounting'],
     'hr': ['hr', 'кадры', 'вакансии', 'работа', 'рекрутинг', 'найм', 'резюме'],
+    'travel': ['виза', 'визы', 'путешествие', 'туризм', 'эмиграция', 'иммиграция', 'релокация',
+               'переезд', 'abroad', 'заграница', 'expat'],
+    'services': ['услуги', 'ремонт', 'уборка', 'мастер', 'красота', 'фото', 'видео',
+                 'свадьба', 'event', 'кейтеринг'],
 }
 
 
@@ -249,40 +267,58 @@ async def suggest_chats(niche: str) -> List[dict]:
     """
     results = []
     
-    # 1. Определяем категорию
-    category = detect_category(niche)
-    
-    # 2. Берём из встроенной базы
-    db_chats = CHAT_DATABASE.get(category, [])
-    for chat in db_chats[:10]:
-        results.append({
-            'username': chat,
-            'link': f't.me/{chat.replace("@", "")}',
-            'source': 'database'
-        })
-    
-    # 3. Пробуем найти на Telemetr.me
     try:
-        telemetr_chats = await search_telemetr_chats(niche)
-        for chat in telemetr_chats[:5]:
-            if chat['username'] not in [r['username'] for r in results]:
-                chat['source'] = 'telemetr'
-                results.append(chat)
-    except Exception:
-        pass  # Если скрапинг не сработал, используем только базу
-    
-    # 4. Если есть OpenAI, дополняем AI-предложениями названий
-    if client and len(results) < 10:
+        # 1. Определяем категорию
+        category = detect_category(niche)
+        logger.info(f"Detected category '{category}' for niche '{niche}'")
+        
+        # 2. Берём из встроенной базы
+        db_chats = CHAT_DATABASE.get(category, [])
+        for chat in db_chats[:10]:
+            results.append({
+                'username': chat,
+                'link': f't.me/{chat.replace("@", "")}',
+                'source': 'database'
+            })
+        
+        logger.info(f"Found {len(results)} chats from database")
+        
+        # 3. Пробуем найти на Telemetr.me (опционально)
         try:
-            ai_suggestions = await suggest_chat_names_ai(niche)
-            for name in ai_suggestions[:5]:
-                results.append({
-                    'username': name,
-                    'link': None,
-                    'source': 'ai_suggestion'
-                })
-        except Exception:
-            pass
+            telemetr_chats = await search_telemetr_chats(niche)
+            for chat in telemetr_chats[:5]:
+                if chat['username'] not in [r['username'] for r in results]:
+                    chat['source'] = 'telemetr'
+                    results.append(chat)
+            logger.info(f"Found {len(telemetr_chats)} chats from Telemetr")
+        except Exception as e:
+            logger.warning(f"Telemetr search failed: {e}")
+        
+        # 4. Если есть OpenAI и мало результатов, дополняем AI-предложениями
+        if client and len(results) < 10:
+            try:
+                ai_suggestions = await suggest_chat_names_ai(niche)
+                for name in ai_suggestions[:5]:
+                    results.append({
+                        'username': name,
+                        'link': None,
+                        'source': 'ai_suggestion'
+                    })
+                logger.info(f"Added {len(ai_suggestions)} AI suggestions")
+            except Exception as e:
+                logger.warning(f"AI suggestions failed: {e}")
+        
+        logger.info(f"Total chats found: {len(results)}")
+        
+    except Exception as e:
+        logger.error(f"Error in suggest_chats: {e}")
+        # Возвращаем хотя бы что-то из общей базы фриланса
+        for chat in CHAT_DATABASE.get('freelance', [])[:5]:
+            results.append({
+                'username': chat,
+                'link': f't.me/{chat.replace("@", "")}',
+                'source': 'database'
+            })
     
     return results[:15]
 
