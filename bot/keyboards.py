@@ -213,3 +213,19 @@ def amocrm_menu_kb(is_connected: bool = False, lang: str = 'ru') -> InlineKeyboa
     
     builder.adjust(1)
     return builder.as_markup()
+
+
+def filters_menu_kb(has_filters: bool = False, lang: str = 'ru') -> InlineKeyboardMarkup:
+    """Меню фильтров"""
+    builder = InlineKeyboardBuilder()
+    
+    builder.button(text='➕ Добавить фильтр', callback_data='filters:add')
+    
+    if has_filters:
+        builder.button(text='📋 Показать все', callback_data='filters:list')
+        builder.button(text='🗑 Удалить все', callback_data='filters:clear')
+    
+    builder.button(text='🔙 Главное меню', callback_data='menu:main')
+    
+    builder.adjust(1)
+    return builder.as_markup()

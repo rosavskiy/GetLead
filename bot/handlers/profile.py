@@ -292,6 +292,14 @@ async def show_recent_leads(callback: CallbackQuery, user: User):
 @router.callback_query(F.data == 'profile:settings')
 async def show_settings(callback: CallbackQuery, user: User):
     """Показать настройки пользователя"""
+    
+    # Проверяем интеграцию AmoCRM
+    async with async_session_maker() as session:
+        from database.crud import AmoCRMCRUD
+        amocrm = await AmoCRMCRUD.get_by_user(session, user.id)
+    
+    amocrm_status = '✅ Подключен' if amocrm and amocrm.is_active else '❌ Не подключен'
+    
     text = f"""⚙️ <b>Настройки</b>
 
 🌐 <b>Язык:</b> {'Русский 🇷🇺' if user.language == 'ru' else 'English 🇬🇧'}
@@ -299,7 +307,7 @@ async def show_settings(callback: CallbackQuery, user: User):
 🔔 <b>Уведомления:</b> Включены
 
 🔗 <b>Интеграции:</b>
-• AmoCRM: {'✅ Подключен' if hasattr(user, 'amocrm_integration') and user.amocrm_integration else '❌ Не подключен'}
+• AmoCRM: {amocrm_status}
 
 💡 Для настройки интеграций используйте меню ниже."""
     

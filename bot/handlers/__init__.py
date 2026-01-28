@@ -1,6 +1,6 @@
 """Регистрация всех обработчиков"""
 from aiogram import Dispatcher
-from bot.handlers import common, projects, keywords, chats, payment, admin, profile, integrations
+from bot.handlers import common, projects, keywords, chats, payment, admin, profile, integrations, filters
 
 
 def register_all_handlers(dp: Dispatcher):
@@ -13,5 +13,6 @@ def register_all_handlers(dp: Dispatcher):
     dp.include_router(integrations.router)  # Интеграции
     dp.include_router(projects.router)
     dp.include_router(keywords.router)
+    dp.include_router(filters.router)  # Фильтры
     dp.include_router(chats.router)
     dp.include_router(payment.router)
