@@ -108,109 +108,81 @@ class UserbotWorker:
             logger.error(f"Ошибка подключения к Redis для поиска: {e}")
     
     async def search_chats(self, query: str) -> list:
-        """Поиск чатов через Telegram API - ГЛОБАЛЬНЫЙ поиск по всему Telegram"""
+        """
+        Поиск ПУБЛИЧНЫХ чатов по всему Telegram!
+        
+        Используем contacts.Search - он ищет публичные username'ы по названию.
+        Фильтруем чаты юзербота чтобы не показывать их.
+        """
         results = []
-        seen_chat_ids = set()
+        seen_usernames = set()
         
         try:
-            from telethon.tl.types import InputMessagesFilterEmpty, InputPeerEmpty
-            from telethon.tl.functions.messages import SearchGlobalRequest
+            # 1. Получаем список чатов юзербота чтобы их исключить
+            userbot_chat_ids = set()
+            async for dialog in self.client.iter_dialogs(limit=200):
+                if dialog.entity:
+                    userbot_chat_ids.add(dialog.entity.id)
             
-            logger.info(f"🔍 Выполняю SearchGlobal для: '{query}'")
+            logger.info(f"🔍 Поиск публичных чатов: '{query}' (исключаем {len(userbot_chat_ids)} чатов юзербота)")
             
-            # Делаем несколько запросов с пагинацией для большего охвата
-            offset_rate = 0
-            offset_id = 0
-            offset_peer = InputPeerEmpty()
-            total_messages = 0
-            total_chats_raw = 0
+            # 2. ГЛАВНЫЙ ПОИСК - contacts.Search ищет публичные чаты по ВСЕМУ Telegram!
+            search_result = await self.client(functions.contacts.SearchRequest(
+                q=query,
+                limit=50  # Максимум что позволяет API
+            ))
             
-            for page in range(3):  # 3 страницы по 100 сообщений = 300 сообщений
-                search_result = await self.client(SearchGlobalRequest(
-                    q=query,
-                    filter=InputMessagesFilterEmpty(),
-                    min_date=None,
-                    max_date=None,
-                    offset_rate=offset_rate,
-                    offset_peer=offset_peer,
-                    offset_id=offset_id,
-                    limit=100  # Максимум за запрос
-                ))
-                
-                if not search_result.messages:
-                    break
-                
-                total_messages += len(search_result.messages)
-                total_chats_raw += len(search_result.chats)
-                
-                # Считаем релевантность
-                for msg in search_result.messages:
-                    chat_id = getattr(msg, 'peer_id', None)
-                    if chat_id:
-                        real_id = getattr(chat_id, 'channel_id', None) or getattr(chat_id, 'chat_id', None)
-                        if real_id:
-                            if real_id not in seen_chat_ids:
-                                seen_chat_ids.add(real_id)
-                
-                # Обрабатываем чаты
-                for chat in search_result.chats:
-                    try:
-                        # Пропускаем уже обработанные
-                        if any(r.get('chat_id') == chat.id for r in results):
-                            continue
-                        
-                        # Пропускаем чаты без username
-                        if not hasattr(chat, 'username') or not chat.username:
-                            continue
-                        
-                        # Пропускаем каналы - только группы
-                        if isinstance(chat, Channel):
-                            if chat.broadcast and not chat.megagroup:
-                                logger.debug(f"  ⏭ Пропущен канал: {chat.username}")
-                                continue
-                        
-                        subscribers = getattr(chat, 'participants_count', None)
-                        
-                        results.append({
-                            'chat_id': chat.id,
-                            'username': f'@{chat.username}',
-                            'title': getattr(chat, 'title', chat.username),
-                            'link': f't.me/{chat.username}',
-                            'subscribers': subscribers,
-                            'type': 'supergroup',
-                            'relevance': 1,
-                            'verified': True
-                        })
-                        
-                        logger.info(f"  ✅ Группа: @{chat.username} ({subscribers} участников)")
-                        
-                    except Exception as e:
+            logger.info(f"📊 contacts.Search вернул: {len(search_result.chats)} чатов, {len(search_result.users)} юзеров")
+            
+            for chat in search_result.chats:
+                try:
+                    # Пропускаем чаты без username
+                    if not hasattr(chat, 'username') or not chat.username:
                         continue
-                
-                # Подготовка для следующей страницы
-                if search_result.messages:
-                    last_msg = search_result.messages[-1]
-                    offset_rate = getattr(search_result, 'next_rate', 0) or 0
-                    offset_id = last_msg.id
-                    # offset_peer остаётся InputPeerEmpty для глобального поиска
-                
-                # Пауза между запросами
-                await asyncio.sleep(0.3)
+                    
+                    # Пропускаем дубликаты
+                    if chat.username.lower() in seen_usernames:
+                        continue
+                    seen_usernames.add(chat.username.lower())
+                    
+                    # ⚠️ ВАЖНО: Пропускаем чаты юзербота!
+                    if chat.id in userbot_chat_ids:
+                        logger.debug(f"  ⏭ Пропущен чат юзербота: @{chat.username}")
+                        continue
+                    
+                    # Пропускаем каналы - только группы/супергруппы
+                    if isinstance(chat, Channel):
+                        if chat.broadcast and not chat.megagroup:
+                            logger.debug(f"  ⏭ Пропущен канал: @{chat.username}")
+                            continue
+                    
+                    subscribers = getattr(chat, 'participants_count', None)
+                    
+                    results.append({
+                        'username': f'@{chat.username}',
+                        'title': getattr(chat, 'title', chat.username),
+                        'link': f't.me/{chat.username}',
+                        'subscribers': subscribers,
+                        'type': 'supergroup',
+                        'verified': True
+                    })
+                    
+                    logger.info(f"  ✅ Найден: @{chat.username} ({subscribers} участников)")
+                    
+                except Exception as e:
+                    logger.warning(f"Ошибка обработки чата: {e}")
+                    continue
             
-            logger.info(f"📊 SearchGlobal: {total_messages} сообщений, {total_chats_raw} чатов raw, {len(results)} групп итого")
-            
-            # Сортируем по подписчикам
+            # Сортируем по количеству участников
             results.sort(key=lambda x: -(x.get('subscribers') or 0))
+            
+            logger.info(f"✅ Итого найдено {len(results)} публичных групп для '{query}'")
             
         except FloodWaitError as e:
             logger.warning(f"Flood wait: {e.seconds}s")
             await asyncio.sleep(min(e.seconds, 30))
         except Exception as e:
             logger.error(f"Search error: {e}", exc_info=True)
-        
-        # Убираем внутренний chat_id из результата
-        for r in results:
-            r.pop('chat_id', None)
         
         return results[:20]
     
