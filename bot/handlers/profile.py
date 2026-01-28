@@ -320,3 +320,103 @@ async def show_settings(callback: CallbackQuery, user: User):
     )
     await callback.answer()
 
+
+@router.callback_query(F.data == 'settings:language')
+async def show_language_settings(callback: CallbackQuery, user: User):
+    """Показать выбор языка"""
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    
+    builder = InlineKeyboardBuilder()
+    
+    ru_check = '✅' if user.language == 'ru' else ''
+    en_check = '✅' if user.language == 'en' else ''
+    
+    builder.button(text=f'{ru_check} 🇷🇺 Русский', callback_data='lang:ru')
+    builder.button(text=f'{en_check} 🇬🇧 English', callback_data='lang:en')
+    builder.button(text='🔙 Назад', callback_data='profile:settings')
+    builder.adjust(2, 1)
+    
+    text = """🌐 <b>Выбор языка</b>
+
+Выберите язык интерфейса:"""
+    
+    await callback.message.edit_text(
+        text,
+        reply_markup=builder.as_markup(),
+        parse_mode='HTML'
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith('lang:'))
+async def change_language(callback: CallbackQuery, user: User):
+    """Сменить язык"""
+    new_lang = callback.data.split(':')[1]
+    
+    async with async_session_maker() as session:
+        from sqlalchemy import update
+        from database.models import User as UserModel
+        
+        await session.execute(
+            update(UserModel)
+            .where(UserModel.id == user.id)
+            .values(language=new_lang)
+        )
+        await session.commit()
+    
+    # Обновляем язык в объекте user для текущего запроса
+    user.language = new_lang
+    
+    lang_name = 'Русский 🇷🇺' if new_lang == 'ru' else 'English 🇬🇧'
+    await callback.answer(f'✅ Язык изменён на {lang_name}')
+    
+    # Возвращаемся в настройки
+    await show_settings(callback, user)
+
+
+@router.callback_query(F.data == 'settings:notifications')
+async def show_notifications_settings(callback: CallbackQuery, user: User):
+    """Показать настройки уведомлений"""
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    
+    builder = InlineKeyboardBuilder()
+    builder.button(text='✅ Все уведомления', callback_data='notif:all')
+    builder.button(text='🔕 Только важные', callback_data='notif:important')
+    builder.button(text='❌ Отключить', callback_data='notif:off')
+    builder.button(text='🔙 Назад', callback_data='profile:settings')
+    builder.adjust(1)
+    
+    text = """🔔 <b>Настройки уведомлений</b>
+
+Текущий статус: <b>Все уведомления включены</b>
+
+Выберите режим уведомлений:
+
+• <b>Все уведомления</b> — получать уведомления о каждом найденном лиде
+• <b>Только важные</b> — уведомления раз в час со сводкой
+• <b>Отключить</b> — не получать уведомления (лиды сохраняются)
+
+⚠️ Функция настройки режимов в разработке"""
+    
+    await callback.message.edit_text(
+        text,
+        reply_markup=builder.as_markup(),
+        parse_mode='HTML'
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith('notif:'))
+async def change_notifications(callback: CallbackQuery, user: User):
+    """Сменить режим уведомлений (заглушка)"""
+    mode = callback.data.split(':')[1]
+    
+    modes = {
+        'all': 'Все уведомления',
+        'important': 'Только важные',
+        'off': 'Отключены'
+    }
+    
+    # TODO: Сохранить настройку в БД (нужно добавить поле в модель User)
+    await callback.answer(f'✅ Режим: {modes.get(mode, "Все")}. Функция в разработке.', show_alert=True)
+
