@@ -180,8 +180,19 @@ async def process_ai_chats(message: Message, user: User, state: FSMContext):
         chat_suggestions = await suggest_chats(niche)
         
         if not chat_suggestions:
-            err_text = '❌ Не удалось найти чаты для этой ниши.\nПопробуйте другие ключевые слова.' if lang == 'ru' else '❌ Could not find chats for this niche.\nTry different keywords.'
-            await status_msg.edit_text(err_text)
+            if lang == 'ru':
+                err_text = ('❌ Не удалось найти чаты по запросу.\n\n'
+                           '💡 <b>Попробуйте:</b>\n'
+                           '• Использовать более общие слова\n'
+                           '• Ввести тему на русском и английском\n'
+                           '• Поискать чаты вручную в Telegram')
+            else:
+                err_text = ('❌ Could not find chats for this query.\n\n'
+                           '💡 <b>Try:</b>\n'
+                           '• Use more general keywords\n'
+                           '• Search in both Russian and English\n'
+                           '• Search manually in Telegram')
+            await status_msg.edit_text(err_text, parse_mode='HTML')
             await state.clear()
             return
         
@@ -189,50 +200,30 @@ async def process_ai_chats(message: Message, user: User, state: FSMContext):
         
         # Показываем результат
         if lang == 'ru':
-            text = f'🎯 <b>Чаты для ниши "{niche}"</b>\n\n'
+            text = f'🎯 <b>Чаты по запросу "{niche}"</b>\n\n'
         else:
-            text = f'🎯 <b>Chats for niche "{niche}"</b>\n\n'
+            text = f'🎯 <b>Chats for "{niche}"</b>\n\n'
         
-        # Группируем по источнику
-        verified_chats = []  # 100% существующие (через Telegram API)
-        web_chats = []       # Из веб-парсинга (не проверены)
-        
-        for chat in chat_suggestions:
-            if chat.get('verified', False):
-                verified_chats.append(chat)
+        # Все чаты верифицированы через Telegram API
+        for chat in chat_suggestions[:15]:
+            title = chat.get('title', chat['username'])
+            subs = chat.get('subscribers')
+            if subs:
+                subs_str = f" • <b>{format_subscribers(subs)}</b>"
             else:
-                web_chats.append(chat)
+                subs_str = ""
+            
+            # Тип чата
+            chat_type = chat.get('type', '')
+            type_emoji = ''
+            if chat_type == 'channel':
+                type_emoji = '📢 '
+            elif chat_type in ('supergroup', 'group'):
+                type_emoji = '👥 '
+            
+            text += f"• {type_emoji}<a href=\"https://{chat['link']}\">{title}</a>{subs_str}\n"
         
-        # Верифицированные чаты (найдены через Telegram - 100% существуют!)
-        if verified_chats:
-            header = '✅ <b>Проверенные чаты:</b>' if lang == 'ru' else '✅ <b>Verified chats:</b>'
-            text += f'{header}\n'
-            for chat in verified_chats[:15]:
-                title = chat.get('title', chat['username'])
-                subs = chat.get('subscribers')
-                if subs:
-                    subs_str = f" • <b>{format_subscribers(subs)}</b>"
-                else:
-                    subs_str = ""
-                
-                # Тип чата
-                chat_type = chat.get('type', '')
-                type_emoji = ''
-                if chat_type == 'channel':
-                    type_emoji = '📢 '
-                elif chat_type in ('supergroup', 'group'):
-                    type_emoji = '👥 '
-                
-                text += f"• {type_emoji}<a href=\"https://{chat['link']}\">{title}</a>{subs_str}\n"
-            text += '\n'
-        
-        # Чаты из веб-парсинга (непроверенные)
-        if web_chats:
-            header = '🔍 <b>Найдено в сети (требует проверки):</b>' if lang == 'ru' else '🔍 <b>Found online (needs verification):</b>'
-            text += f'{header}\n'
-            for chat in web_chats[:5]:
-                text += f"• {chat['username']}\n"
-            text += '\n'
+        text += '\n'
         
         # Инструкция
         if lang == 'ru':

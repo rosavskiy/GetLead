@@ -26,17 +26,18 @@ async def get_search_client() -> Optional[TelegramClient]:
         if _search_client is not None and _search_client.is_connected():
             return _search_client
         
-        # Берём первый доступный юзербот
-        if not settings.USERBOT_SESSIONS:
+        # Берём первый доступный юзербот из userbots_config
+        userbots = settings.userbots_config
+        if not userbots:
             logger.warning("No userbot sessions configured for chat search")
             return None
         
-        session = settings.USERBOT_SESSIONS[0]
+        session = userbots[0]
         try:
             client = TelegramClient(
                 f"sessions/{session['session_name']}",
-                settings.API_ID,
-                settings.API_HASH
+                session['api_id'],
+                session['api_hash']
             )
             await client.connect()
             
@@ -565,14 +566,15 @@ async def suggest_chats(niche: str, min_subscribers: int = 100) -> List[dict]:
     """
     Предложение РЕАЛЬНЫХ чатов для мониторинга
     
-    НОВАЯ стратегия (гарантирует существование чатов):
-    1. ГЛАВНОЕ: Ищем через Telegram Global Search API 
-    2. Дополнительно пробуем Telemetr/TGStat (но результаты верифицируем)
-    3. Все чаты 100% существуют и проверены!
+    Стратегия:
+    1. Ищем через Telegram Global Search API (100% существующие чаты)
+    2. Если Telegram недоступен - сообщаем пользователю
+    
+    ВАЖНО: Веб-парсинг Telemetr/TGStat отключён - они возвращают мусор!
     
     Args:
         niche: Описание ниши
-        min_subscribers: Минимум подписчиков (по умолчанию 100 - снижено для лучшего охвата)
+        min_subscribers: Минимум подписчиков
         
     Returns:
         Список словарей с информацией о РЕАЛЬНЫХ чатах
@@ -595,7 +597,7 @@ async def suggest_chats(niche: str, min_subscribers: int = 100) -> List[dict]:
         # Убираем дубликаты
         search_queries = list(dict.fromkeys(search_queries))
         
-        # 2. ГЛАВНЫЙ поиск через Telegram API (ГАРАНТИРОВАННЫЕ результаты)
+        # 2. Поиск через Telegram API (ЕДИНСТВЕННЫЙ надёжный источник!)
         for query in search_queries[:4]:
             try:
                 telegram_results = await search_telegram_chats(query, limit=15)
@@ -614,47 +616,18 @@ async def suggest_chats(niche: str, min_subscribers: int = 100) -> List[dict]:
         
         logger.info(f"Found {len(results)} VERIFIED chats from Telegram search")
         
-        # 3. Дополнительный веб-поиск (результаты НЕ верифицированы)
-        web_results = []
-        try:
-            web_tasks = []
-            for query in search_queries[:2]:
-                web_tasks.append(search_telemetr_chats(query, min_subscribers))
-                web_tasks.append(search_tgstat_chats(query, min_subscribers))
-            
-            web_search_results = await asyncio.gather(*web_tasks, return_exceptions=True)
-            
-            for result in web_search_results:
-                if isinstance(result, list):
-                    for chat in result:
-                        username_lower = chat['username'].lower()
-                        if username_lower not in seen_usernames:
-                            # Помечаем как непроверенные
-                            chat['verified'] = False
-                            chat['subscribers'] = None  # Убираем фейковые числа!
-                            web_results.append(chat)
-                            seen_usernames.add(username_lower)
-            
-            logger.info(f"Found {len(web_results)} UNVERIFIED chats from web")
-            
-        except Exception as e:
-            logger.warning(f"Web search failed: {e}")
+        # ВАЖНО: Веб-парсинг (Telemetr/TGStat) ОТКЛЮЧЁН!
+        # Они возвращают мусорные данные - топ каналов без фильтрации по запросу
         
-        # 4. Сортируем: сначала верифицированные, потом по подписчикам
-        results.sort(key=lambda x: (
-            0 if x.get('verified', False) else 1,  # Верифицированные первые
-            -(x.get('subscribers') or 0)  # По подписчикам убывание
-        ))
+        # 3. Сортируем по подписчикам
+        results.sort(key=lambda x: -(x.get('subscribers') or 0))
         
-        # 5. Фильтруем по минимальному количеству подписчиков (только для верифицированных)
+        # 4. Фильтруем по минимальному количеству подписчиков
         final_results = []
         for r in results:
             subs = r.get('subscribers')
             if subs is None or subs >= min_subscribers:
                 final_results.append(r)
-        
-        # Добавляем веб-результаты в конец
-        final_results.extend(web_results)
         
         logger.info(f"Total results: {len(final_results)} chats")
         
