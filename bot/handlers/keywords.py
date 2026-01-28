@@ -87,6 +87,74 @@ async def process_keywords(message: Message, user: User, state: FSMContext):
     await message.answer(text, reply_markup=main_menu_kb(user.language))
 
 
+@router.callback_query(F.data == 'keywords:list')
+async def list_keywords(callback: CallbackQuery, user: User):
+    """Показать список ключевых слов с возможностью удаления"""
+    async with async_session_maker() as session:
+        active_project = await ProjectCRUD.get_active(session, user.id)
+        
+        if not active_project:
+            await callback.answer('❌ Проект не найден!', show_alert=True)
+            return
+        
+        keywords = await KeywordCRUD.get_all(session, active_project.id, KeywordType.INCLUDE)
+    
+    if not keywords:
+        no_kw = 'У вас пока нет ключевых слов' if user.language == 'ru' else 'You have no keywords yet'
+        await callback.answer(no_kw, show_alert=True)
+        return
+    
+    # Создаём inline клавиатуру со списком слов
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    builder = InlineKeyboardBuilder()
+    
+    for kw in keywords:
+        builder.button(
+            text=f'❌ {kw.text}',
+            callback_data=f'kw:del:{kw.id}'
+        )
+    
+    # По 2 кнопки в ряд
+    builder.adjust(2)
+    
+    # Кнопка назад
+    back_text = '⬅️ Назад' if user.language == 'ru' else '⬅️ Back'
+    builder.row()
+    builder.button(text=back_text, callback_data='menu:keywords')
+    
+    header = '🔑 <b>Ваши ключевые слова:</b>' if user.language == 'ru' else '🔑 <b>Your keywords:</b>'
+    hint = '\n\n<i>Нажмите на слово чтобы удалить</i>' if user.language == 'ru' else '\n\n<i>Click to delete</i>'
+    
+    await callback.message.edit_text(
+        f'{header}{hint}',
+        reply_markup=builder.as_markup(),
+        parse_mode='HTML'
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith('kw:del:'))
+async def delete_single_keyword(callback: CallbackQuery, user: User):
+    """Удалить одно ключевое слово"""
+    keyword_id = int(callback.data.split(':')[2])
+    
+    async with async_session_maker() as session:
+        # Получаем слово для показа в уведомлении
+        keyword = await KeywordCRUD.get_by_id(session, keyword_id)
+        if keyword:
+            keyword_text = keyword.text
+            await KeywordCRUD.delete(session, keyword_id)
+            
+            deleted = f'Удалено: {keyword_text}' if user.language == 'ru' else f'Deleted: {keyword_text}'
+            await callback.answer(deleted)
+        else:
+            await callback.answer('❌ Слово не найдено', show_alert=True)
+            return
+    
+    # Обновляем список
+    await list_keywords(callback, user)
+
+
 @router.callback_query(F.data == 'keywords:clear')
 async def clear_keywords(callback: CallbackQuery, user: User):
     """Удалить все ключевые слова"""

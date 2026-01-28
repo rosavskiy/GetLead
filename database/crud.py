@@ -113,6 +113,14 @@ class KeywordCRUD:
         return keyword
     
     @staticmethod
+    async def get_by_id(session: AsyncSession, keyword_id: int) -> Optional[Keyword]:
+        """Получить ключевое слово по ID"""
+        result = await session.execute(
+            select(Keyword).where(Keyword.id == keyword_id)
+        )
+        return result.scalar_one_or_none()
+    
+    @staticmethod
     async def get_all(session: AsyncSession, project_id: int, keyword_type: KeywordType) -> List[Keyword]:
         """Получить все ключевые слова проекта определенного типа"""
         result = await session.execute(
@@ -120,6 +128,14 @@ class KeywordCRUD:
             .where(Keyword.project_id == project_id, Keyword.type == keyword_type)
         )
         return list(result.scalars().all())
+    
+    @staticmethod
+    async def delete(session: AsyncSession, keyword_id: int):
+        """Удалить ключевое слово по ID"""
+        await session.execute(
+            delete(Keyword).where(Keyword.id == keyword_id)
+        )
+        await session.commit()
     
     @staticmethod
     async def delete_all(session: AsyncSession, project_id: int, keyword_type: KeywordType):

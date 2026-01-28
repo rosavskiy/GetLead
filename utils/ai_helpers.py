@@ -2,6 +2,7 @@
 import aiohttp
 import re
 import logging
+import httpx
 from openai import AsyncOpenAI
 from typing import List, Optional
 from config import settings
@@ -12,7 +13,12 @@ logger = logging.getLogger(__name__)
 def get_openai_client() -> Optional[AsyncOpenAI]:
     """Создаёт OpenAI клиент по требованию (избегаем проблем с глобальным клиентом)"""
     if settings.OPENAI_API_KEY:
-        return AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+        # Создаём httpx клиент без proxies для избежания конфликта версий
+        http_client = httpx.AsyncClient()
+        return AsyncOpenAI(
+            api_key=settings.OPENAI_API_KEY,
+            http_client=http_client
+        )
     return None
 
 # Встроенная база популярных чатов по категориям (бесплатно!)
