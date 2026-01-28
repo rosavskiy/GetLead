@@ -108,7 +108,7 @@ class UserbotWorker:
             logger.error(f"Ошибка подключения к Redis для поиска: {e}")
     
     async def search_chats(self, query: str) -> list:
-        """Поиск чатов через Telegram API"""
+        """Поиск чатов через Telegram API - ГЛОБАЛЬНЫЙ поиск по всему Telegram"""
         results = []
         seen_chat_ids = set()
         
@@ -116,7 +116,9 @@ class UserbotWorker:
             from telethon.tl.types import InputMessagesFilterEmpty, InputPeerEmpty
             from telethon.tl.functions.messages import SearchGlobalRequest
             
-            # 1. Глобальный поиск по сообщениям
+            logger.info(f"🔍 Выполняю SearchGlobal для: '{query}'")
+            
+            # ГЛОБАЛЬНЫЙ поиск по сообщениям во ВСЕХ публичных чатах Telegram
             search_result = await self.client(SearchGlobalRequest(
                 q=query,
                 filter=InputMessagesFilterEmpty(),
@@ -125,10 +127,12 @@ class UserbotWorker:
                 offset_rate=0,
                 offset_peer=InputPeerEmpty(),
                 offset_id=0,
-                limit=30
+                limit=50  # Увеличил лимит
             ))
             
-            # Считаем релевантность
+            logger.info(f"📊 SearchGlobal вернул: {len(search_result.messages)} сообщений, {len(search_result.chats)} чатов")
+            
+            # Считаем релевантность (сколько сообщений из каждого чата)
             chat_relevance = {}
             for msg in search_result.messages:
                 chat_id = getattr(msg, 'peer_id', None)
@@ -137,26 +141,25 @@ class UserbotWorker:
                     if real_id:
                         chat_relevance[real_id] = chat_relevance.get(real_id, 0) + 1
             
-            # Обрабатываем чаты
+            # Обрабатываем чаты из результатов глобального поиска
             for chat in search_result.chats:
                 try:
                     if chat.id in seen_chat_ids:
                         continue
                     seen_chat_ids.add(chat.id)
                     
+                    # Пропускаем чаты без username (приватные)
                     if not hasattr(chat, 'username') or not chat.username:
                         continue
                     
-                    # ВАЖНО: Пропускаем каналы (broadcast) - мы не можем мониторить их комментарии
-                    # Оставляем только чаты (megagroup) где есть сообщения пользователей
+                    # Пропускаем каналы - оставляем только группы/супергруппы
                     if isinstance(chat, Channel):
                         if chat.broadcast and not chat.megagroup:
-                            # Это канал, не чат - пропускаем
                             continue
                     
                     subscribers = getattr(chat, 'participants_count', None)
                     
-                    chat_type = 'supergroup'  # Теперь это всегда чат
+                    chat_type = 'supergroup'
                     if isinstance(chat, Channel):
                         if chat.megagroup:
                             chat_type = 'supergroup'
@@ -174,15 +177,17 @@ class UserbotWorker:
                         'relevance': relevance,
                         'verified': True
                     })
-                except Exception:
+                    
+                    logger.debug(f"  ✅ Добавлен: {chat.username} (subs: {subscribers}, rel: {relevance})")
+                    
+                except Exception as e:
+                    logger.warning(f"Ошибка обработки чата: {e}")
                     continue
             
-            # ВАЖНО: contacts.SearchRequest убран!
-            # Он возвращает чаты из диалогов юзербота, а не публичные чаты по запросу.
-            # Используем только SearchGlobal который ищет по содержимому сообщений.
-            
-            # Сортируем по релевантности (кол-во найденных сообщений) и подписчикам
+            # Сортируем по релевантности и подписчикам
             results.sort(key=lambda x: (-x.get('relevance', 0), -(x.get('subscribers') or 0)))
+            
+            logger.info(f"✅ Итого найдено {len(results)} групп для '{query}'")
             
         except FloodWaitError as e:
             logger.warning(f"Flood wait: {e.seconds}s")
