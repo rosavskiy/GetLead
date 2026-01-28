@@ -118,82 +118,99 @@ class UserbotWorker:
             
             logger.info(f"🔍 Выполняю SearchGlobal для: '{query}'")
             
-            # ГЛОБАЛЬНЫЙ поиск по сообщениям во ВСЕХ публичных чатах Telegram
-            search_result = await self.client(SearchGlobalRequest(
-                q=query,
-                filter=InputMessagesFilterEmpty(),
-                min_date=None,
-                max_date=None,
-                offset_rate=0,
-                offset_peer=InputPeerEmpty(),
-                offset_id=0,
-                limit=50  # Увеличил лимит
-            ))
+            # Делаем несколько запросов с пагинацией для большего охвата
+            offset_rate = 0
+            offset_id = 0
+            offset_peer = InputPeerEmpty()
+            total_messages = 0
+            total_chats_raw = 0
             
-            logger.info(f"📊 SearchGlobal вернул: {len(search_result.messages)} сообщений, {len(search_result.chats)} чатов")
-            
-            # Считаем релевантность (сколько сообщений из каждого чата)
-            chat_relevance = {}
-            for msg in search_result.messages:
-                chat_id = getattr(msg, 'peer_id', None)
-                if chat_id:
-                    real_id = getattr(chat_id, 'channel_id', None) or getattr(chat_id, 'chat_id', None)
-                    if real_id:
-                        chat_relevance[real_id] = chat_relevance.get(real_id, 0) + 1
-            
-            # Обрабатываем чаты из результатов глобального поиска
-            for chat in search_result.chats:
-                try:
-                    if chat.id in seen_chat_ids:
-                        continue
-                    seen_chat_ids.add(chat.id)
-                    
-                    # Пропускаем чаты без username (приватные)
-                    if not hasattr(chat, 'username') or not chat.username:
-                        continue
-                    
-                    # Пропускаем каналы - оставляем только группы/супергруппы
-                    if isinstance(chat, Channel):
-                        if chat.broadcast and not chat.megagroup:
+            for page in range(3):  # 3 страницы по 100 сообщений = 300 сообщений
+                search_result = await self.client(SearchGlobalRequest(
+                    q=query,
+                    filter=InputMessagesFilterEmpty(),
+                    min_date=None,
+                    max_date=None,
+                    offset_rate=offset_rate,
+                    offset_peer=offset_peer,
+                    offset_id=offset_id,
+                    limit=100  # Максимум за запрос
+                ))
+                
+                if not search_result.messages:
+                    break
+                
+                total_messages += len(search_result.messages)
+                total_chats_raw += len(search_result.chats)
+                
+                # Считаем релевантность
+                for msg in search_result.messages:
+                    chat_id = getattr(msg, 'peer_id', None)
+                    if chat_id:
+                        real_id = getattr(chat_id, 'channel_id', None) or getattr(chat_id, 'chat_id', None)
+                        if real_id:
+                            if real_id not in seen_chat_ids:
+                                seen_chat_ids.add(real_id)
+                
+                # Обрабатываем чаты
+                for chat in search_result.chats:
+                    try:
+                        # Пропускаем уже обработанные
+                        if any(r.get('chat_id') == chat.id for r in results):
                             continue
-                    
-                    subscribers = getattr(chat, 'participants_count', None)
-                    
-                    chat_type = 'supergroup'
-                    if isinstance(chat, Channel):
-                        if chat.megagroup:
-                            chat_type = 'supergroup'
-                        else:
-                            chat_type = 'group'
-                    
-                    relevance = chat_relevance.get(chat.id, 0)
-                    
-                    results.append({
-                        'username': f'@{chat.username}',
-                        'title': getattr(chat, 'title', chat.username),
-                        'link': f't.me/{chat.username}',
-                        'subscribers': subscribers,
-                        'type': chat_type,
-                        'relevance': relevance,
-                        'verified': True
-                    })
-                    
-                    logger.debug(f"  ✅ Добавлен: {chat.username} (subs: {subscribers}, rel: {relevance})")
-                    
-                except Exception as e:
-                    logger.warning(f"Ошибка обработки чата: {e}")
-                    continue
+                        
+                        # Пропускаем чаты без username
+                        if not hasattr(chat, 'username') or not chat.username:
+                            continue
+                        
+                        # Пропускаем каналы - только группы
+                        if isinstance(chat, Channel):
+                            if chat.broadcast and not chat.megagroup:
+                                logger.debug(f"  ⏭ Пропущен канал: {chat.username}")
+                                continue
+                        
+                        subscribers = getattr(chat, 'participants_count', None)
+                        
+                        results.append({
+                            'chat_id': chat.id,
+                            'username': f'@{chat.username}',
+                            'title': getattr(chat, 'title', chat.username),
+                            'link': f't.me/{chat.username}',
+                            'subscribers': subscribers,
+                            'type': 'supergroup',
+                            'relevance': 1,
+                            'verified': True
+                        })
+                        
+                        logger.info(f"  ✅ Группа: @{chat.username} ({subscribers} участников)")
+                        
+                    except Exception as e:
+                        continue
+                
+                # Подготовка для следующей страницы
+                if search_result.messages:
+                    last_msg = search_result.messages[-1]
+                    offset_rate = getattr(search_result, 'next_rate', 0) or 0
+                    offset_id = last_msg.id
+                    # offset_peer остаётся InputPeerEmpty для глобального поиска
+                
+                # Пауза между запросами
+                await asyncio.sleep(0.3)
             
-            # Сортируем по релевантности и подписчикам
-            results.sort(key=lambda x: (-x.get('relevance', 0), -(x.get('subscribers') or 0)))
+            logger.info(f"📊 SearchGlobal: {total_messages} сообщений, {total_chats_raw} чатов raw, {len(results)} групп итого")
             
-            logger.info(f"✅ Итого найдено {len(results)} групп для '{query}'")
+            # Сортируем по подписчикам
+            results.sort(key=lambda x: -(x.get('subscribers') or 0))
             
         except FloodWaitError as e:
             logger.warning(f"Flood wait: {e.seconds}s")
             await asyncio.sleep(min(e.seconds, 30))
         except Exception as e:
-            logger.error(f"Search error: {e}")
+            logger.error(f"Search error: {e}", exc_info=True)
+        
+        # Убираем внутренний chat_id из результата
+        for r in results:
+            r.pop('chat_id', None)
         
         return results[:20]
     
