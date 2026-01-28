@@ -118,9 +118,8 @@ async def list_keywords(callback: CallbackQuery, user: User):
     builder.adjust(2)
     
     # Кнопка назад
-    back_text = '⬅️ Назад' if user.language == 'ru' else '⬅️ Back'
     builder.row()
-    builder.button(text=back_text, callback_data='menu:keywords')
+    builder.button(text=get_text('btn_back', user.language), callback_data='menu:keywords')
     
     header = '🔑 <b>Ваши ключевые слова:</b>' if user.language == 'ru' else '🔑 <b>Your keywords:</b>'
     hint = '\n\n<i>Нажмите на слово чтобы удалить</i>' if user.language == 'ru' else '\n\n<i>Click to delete</i>'

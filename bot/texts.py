@@ -38,8 +38,8 @@ Choose the language you want to continue with:""",
         'btn_payment': '💳 Тарифы',
         'btn_integrations': '🔗 Интеграции',
         'btn_help': '❓ Помощь',
-        'btn_back': '🔙 Назад',
-        'btn_back_main': '🔙 Главное меню',
+        'btn_back': '⬅️ Назад',
+        'btn_back_main': '⬅️ Главное меню',
         'btn_cancel': '❌ Отмена',
         
         # Проекты
@@ -246,8 +246,8 @@ Start by creating a project and setting up keywords!""",
         'btn_payment': '💳 Plans',
         'btn_integrations': '🔗 Integrations',
         'btn_help': '❓ Help',
-        'btn_back': '🔙 Back',
-        'btn_back_main': '🔙 Main Menu',
+        'btn_back': '⬅️ Back',
+        'btn_back_main': '⬅️ Main Menu',
         'btn_cancel': '❌ Cancel',
         
         # Projects
