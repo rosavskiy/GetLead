@@ -336,12 +336,12 @@ class UserbotWorker:
             # Получаем текст сообщения
             text = event.message.message
             if not text:
-                logger.debug(f"⏭️ Пустое сообщение в чате {chat_id}")
+                logger.debug(f"⏭️ Пустое сообщение в чате {normalized_chat_id}")
                 return
             
             # Игнорируем свои сообщения
             is_outgoing = event.message.out
-            logger.info(f"📨 Мониторируемый чат {chat_id}: '{text[:80]}', out={is_outgoing}")
+            logger.info(f"📨 Мониторируемый чат {normalized_chat_id}: '{text[:80]}', out={is_outgoing}")
             
             if is_outgoing:
                 logger.info(f"⏭️ Пропускаем свое сообщение")
@@ -353,16 +353,16 @@ class UserbotWorker:
                 from sqlalchemy.orm import selectinload
                 from database.models import chat_project_association
                 
-                # Находим чат с проектами
+                # Находим чат с проектами (используем normalized_chat_id!)
                 result = await session.execute(
                     select(Chat)
-                    .where(Chat.telegram_id == chat_id)
+                    .where(Chat.telegram_id == normalized_chat_id)
                     .options(selectinload(Chat.projects).selectinload(Project.user))
                 )
                 chat = result.scalar_one_or_none()
                 
                 if not chat:
-                    logger.warning(f"⚠️ Чат {chat_id} не найден в БД")
+                    logger.warning(f"⚠️ Чат {normalized_chat_id} не найден в БД")
                     return
                 
                 logger.info(f"🔍 Чат {chat.telegram_link} связан с {len(chat.projects)} проектами")
