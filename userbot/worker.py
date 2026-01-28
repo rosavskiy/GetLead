@@ -62,8 +62,29 @@ class UserbotWorker:
         # Запускаем обработчик запросов на поиск чатов через Redis
         asyncio.create_task(self.process_search_requests())
         
+        # Слушаем команды на немедленную перезагрузку чатов
+        asyncio.create_task(self.listen_for_reload_signal())
+        
         # Запускаем клиента
         await self.client.run_until_disconnected()
+    
+    async def listen_for_reload_signal(self):
+        """Слушаем Redis для немедленной перезагрузки чатов"""
+        import redis.asyncio as redis
+        
+        try:
+            redis_client = redis.from_url(settings.REDIS_URL)
+            pubsub = redis_client.pubsub()
+            await pubsub.subscribe('userbot:reload_chats')
+            logger.info(f"📡 {self.session_name}: Слушаю сигналы на перезагрузку чатов...")
+            
+            async for message in pubsub.listen():
+                if message['type'] == 'message':
+                    logger.info(f"📥 Получен сигнал reload_chats, перезагружаю чаты...")
+                    await self.load_chats()
+                    
+        except Exception as e:
+            logger.error(f"❌ Ошибка Redis pubsub: {e}")
     
     async def process_search_requests(self):
         """Обработка запросов на поиск чатов через Redis"""

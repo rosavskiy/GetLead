@@ -1,4 +1,5 @@
 """Обработчики для работы с чатами"""
+import logging
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
@@ -11,6 +12,7 @@ from bot.states import ChatStates
 from bot.texts import get_text
 from bot.keyboards import chats_menu_kb, cancel_kb, main_menu_kb, chats_list_kb, confirm_delete_chat_kb
 
+logger = logging.getLogger(__name__)
 router = Router()
 
 
@@ -94,7 +96,15 @@ async def process_chat_link(message: Message, user: User, state: FSMContext):
             await ChatCRUD.assign_to_project(session, chat.id, active_project.id)
             text = get_text('chat_added', user.language, chat_link=link)
             
-            # TODO: Отправить задачу в юзербот на проверку и вступление в чат
+            # Немедленно уведомляем юзербота о новом чате через Redis
+            try:
+                import redis.asyncio as redis
+                from config import settings
+                redis_client = redis.from_url(settings.REDIS_URL)
+                await redis_client.publish('userbot:reload_chats', 'reload')
+                await redis_client.close()
+            except Exception as e:
+                logger.warning(f"Не удалось уведомить юзербота: {e}")
     
     await state.clear()
     await message.answer(text, reply_markup=main_menu_kb(user.language))
