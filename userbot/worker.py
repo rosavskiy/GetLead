@@ -1,5 +1,6 @@
 """Юзербот для мониторинга чатов"""
 import asyncio
+import json
 import logging
 from typing import Optional
 from telethon import TelegramClient, events, functions
@@ -10,8 +11,9 @@ from aiogram import Bot
 from config import settings
 from database.database import async_session_maker
 from database.models import Chat, Project, KeywordType
-from database.crud import ChatCRUD, ProjectCRUD, KeywordCRUD
+from database.crud import ChatCRUD, ProjectCRUD, KeywordCRUD, LeadMatchCRUD
 from userbot.matching import MatchingEngine
+from utils.cache import CacheService
 
 logger = logging.getLogger(__name__)
 
@@ -184,13 +186,32 @@ class UserbotWorker:
         """Проверка совпадения для конкретного проекта"""
         try:
             async with async_session_maker() as session:
-                # Загружаем ключевые слова
-                include_keywords = await KeywordCRUD.get_all(
-                    session, project.id, KeywordType.INCLUDE
-                )
-                exclude_keywords = await KeywordCRUD.get_all(
-                    session, project.id, KeywordType.EXCLUDE
-                )
+                # Пробуем взять из кэша
+                cached_keywords = await CacheService.get_project_keywords(project.id)
+                
+                if cached_keywords:
+                    # Восстанавливаем объекты из кэша
+                    from database.models import Keyword
+                    include_keywords = [
+                        type('Keyword', (), kw) for kw in cached_keywords.get('include', [])
+                    ]
+                    exclude_keywords = [
+                        type('Keyword', (), kw) for kw in cached_keywords.get('exclude', [])
+                    ]
+                else:
+                    # Загружаем из БД
+                    include_keywords = await KeywordCRUD.get_all(
+                        session, project.id, KeywordType.INCLUDE
+                    )
+                    exclude_keywords = await KeywordCRUD.get_all(
+                        session, project.id, KeywordType.EXCLUDE
+                    )
+                    
+                    # Кэшируем
+                    await CacheService.set_project_keywords(project.id, {
+                        'include': [{'text': k.text, 'type': k.type.value} for k in include_keywords],
+                        'exclude': [{'text': k.text, 'type': k.type.value} for k in exclude_keywords]
+                    })
                 
                 # Проверяем совпадение
                 result = MatchingEngine.process_message(
@@ -201,13 +222,44 @@ class UserbotWorker:
                 )
                 
                 if result['matched']:
+                    message_link = self.get_message_link(event)
+                    
+                    # Получаем информацию об отправителе
+                    sender = await event.get_sender()
+                    sender_username = getattr(sender, 'username', None)
+                    sender_id = getattr(sender, 'id', None)
+                    
+                    # Сохраняем лид в БД
+                    keywords_json = json.dumps([kw.text for kw in result['keywords'][:10]])
+                    
+                    lead_match = await LeadMatchCRUD.create(
+                        session=session,
+                        user_id=project.user_id,
+                        project_id=project.id,
+                        chat_id=chat.id,
+                        message_text=text[:2000],  # Ограничиваем длину
+                        message_link=message_link,
+                        matched_keywords=keywords_json,
+                        telegram_message_id=event.message.id,
+                        sender_username=sender_username,
+                        sender_id=sender_id
+                    )
+                    
+                    # Отправляем в AmoCRM если настроено
+                    try:
+                        from utils.amocrm import send_lead_to_amocrm
+                        await send_lead_to_amocrm(session, project.user_id, lead_match)
+                    except Exception as e:
+                        logger.error(f"Ошибка отправки в AmoCRM: {e}")
+                    
                     # Отправляем уведомление пользователю
                     await self.send_notification(
                         user_telegram_id=project.user.telegram_id,
                         message_text=text,
                         keywords=result['keywords'],
                         chat=chat,
-                        message_link=self.get_message_link(event)
+                        message_link=message_link,
+                        sender_username=sender_username
                     )
         
         except Exception as e:
@@ -219,7 +271,8 @@ class UserbotWorker:
         message_text: str,
         keywords: list,
         chat: Chat,
-        message_link: str
+        message_link: str,
+        sender_username: str = None
     ):
         """Отправка уведомления пользователю"""
         try:
@@ -230,12 +283,15 @@ class UserbotWorker:
             # Форматируем ключевые слова
             keywords_text = ', '.join([kw.text for kw in keywords[:5]])
             
+            # Информация об отправителе
+            sender_info = f"👤 <b>Отправитель:</b> @{sender_username}\n" if sender_username else ""
+            
             # Формируем сообщение
             notification = f"""🔔 <b>Найдено совпадение!</b>
 
 💬 <b>Чат:</b> {chat.title or chat.telegram_link}
 🔑 <b>Ключевые слова:</b> {keywords_text}
-
+{sender_info}
 📝 <b>Текст сообщения:</b>
 {message_text}
 

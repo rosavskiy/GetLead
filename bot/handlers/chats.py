@@ -159,7 +159,7 @@ async def start_ai_chats(callback: CallbackQuery, user: User, state: FSMContext)
 
 @router.message(ChatStates.waiting_for_ai_niche)
 async def process_ai_chats(message: Message, user: User, state: FSMContext):
-    """Обработка AI подбора чатов (заглушка)"""
+    """Обработка AI подбора чатов"""
     if message.text == '❌ Отмена':
         await state.clear()
         await message.answer(
@@ -168,8 +168,39 @@ async def process_ai_chats(message: Message, user: User, state: FSMContext):
         )
         return
     
-    await state.clear()
+    niche = message.text.strip()
     
-    # TODO: Интеграция с OpenAI и поиском чатов
-    text = '🤖 AI-подбор чатов будет доступен после интеграции с OpenAI'
-    await message.answer(text, reply_markup=main_menu_kb(user.language))
+    # Показываем сообщение о генерации
+    status_msg = await message.answer('🤖 Ищу релевантные чаты...')
+    
+    try:
+        from utils.ai_helpers import suggest_chats
+        chat_suggestions = await suggest_chats(niche)
+        
+        if not chat_suggestions:
+            await status_msg.edit_text('❌ Не удалось найти чаты для этой ниши')
+            await state.clear()
+            return
+        
+        await state.clear()
+        
+        # Показываем результат
+        text = f'🤖 <b>Рекомендованные чаты для ниши "{niche}":</b>\n\n'
+        for i, chat_name in enumerate(chat_suggestions[:15], 1):
+            text += f'{i}. {chat_name}\n'
+        
+        text += '\n💡 <b>Как найти чаты:</b>\n'
+        text += '1. Найдите эти чаты в поиске Telegram\n'
+        text += '2. Скопируйте ссылку на чат\n'
+        text += '3. Добавьте через меню "➕ Добавить чат"\n'
+        text += '\n⚠️ Это названия для поиска, а не прямые ссылки'
+        
+        await status_msg.edit_text(text, parse_mode='HTML')
+        await message.answer('Вернуться в меню:', reply_markup=main_menu_kb(user.language))
+        
+    except ValueError as e:
+        await status_msg.edit_text(f'❌ Ошибка: {str(e)}')
+        await state.clear()
+    except Exception as e:
+        await status_msg.edit_text('❌ Произошла ошибка при поиске чатов')
+        await state.clear()

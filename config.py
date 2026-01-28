@@ -46,6 +46,11 @@ class Settings(BaseSettings):
     YOOKASSA_SECRET_KEY: str = ""
     CRYPTOBOT_TOKEN: str = ""
     
+    # AmoCRM (для OAuth интеграции)
+    AMOCRM_CLIENT_ID: str = ""
+    AMOCRM_CLIENT_SECRET: str = ""
+    AMOCRM_REDIRECT_URI: str = ""
+    
     # App Settings
     DEBUG: bool = True
     LOG_LEVEL: str = "INFO"

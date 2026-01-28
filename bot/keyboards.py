@@ -10,14 +10,16 @@ def main_menu_kb(lang: str = 'ru') -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     
     buttons = [
+        ('� Профиль', 'menu:profile'),
+        ('📊 Статистика', 'profile:stats'),
         ('📁 Проекты', 'menu:projects'),
         ('🔑 Ключевые слова', 'menu:keywords'),
         ('🚫 Исключающие слова', 'menu:exclude'),
         ('🔧 Фильтры', 'menu:filters'),
         ('💬 Чаты', 'menu:chats'),
         ('💳 Тарифы', 'menu:payment'),
+        ('🔗 Интеграции', 'menu:integrations'),
         ('❓ Помощь', 'menu:help'),
-        ('💬 Поддержка', 'menu:support'),
     ]
     
     for text, callback in buttons:
@@ -140,3 +142,74 @@ def cancel_kb(lang: str = 'ru') -> ReplyKeyboardMarkup:
     builder = ReplyKeyboardBuilder()
     builder.button(text='❌ Отмена')
     return builder.as_markup(resize_keyboard=True)
+
+
+def profile_menu_kb(lang: str = 'ru') -> InlineKeyboardMarkup:
+    """Меню личного кабинета"""
+    builder = InlineKeyboardBuilder()
+    
+    builder.button(text='📊 Детальная статистика', callback_data='profile:stats')
+    builder.button(text='🎯 Последние лиды', callback_data='profile:leads')
+    builder.button(text='⚙️ Настройки', callback_data='profile:settings')
+    builder.button(text='🔗 Интеграции', callback_data='menu:integrations')
+    builder.button(text='🔙 Главное меню', callback_data='menu:main')
+    
+    builder.adjust(2, 2, 1)
+    return builder.as_markup()
+
+
+def stats_period_kb(lang: str = 'ru') -> InlineKeyboardMarkup:
+    """Выбор периода статистики"""
+    builder = InlineKeyboardBuilder()
+    
+    builder.button(text='📅 Сегодня', callback_data='stats:period:today')
+    builder.button(text='📆 Неделя', callback_data='stats:period:week')
+    builder.button(text='🗓 Месяц', callback_data='stats:period:month')
+    builder.button(text='📊 Всё время', callback_data='stats:period:all')
+    builder.button(text='🔙 Назад', callback_data='menu:profile')
+    
+    builder.adjust(2, 2, 1)
+    return builder.as_markup()
+
+
+def settings_menu_kb(lang: str = 'ru') -> InlineKeyboardMarkup:
+    """Меню настроек"""
+    builder = InlineKeyboardBuilder()
+    
+    builder.button(text='🌐 Сменить язык', callback_data='settings:language')
+    builder.button(text='🔔 Уведомления', callback_data='settings:notifications')
+    builder.button(text='🔗 AmoCRM', callback_data='integrations:amocrm')
+    builder.button(text='🔙 Назад', callback_data='menu:profile')
+    
+    builder.adjust(2, 1, 1)
+    return builder.as_markup()
+
+
+def integrations_menu_kb(has_amocrm: bool = False, lang: str = 'ru') -> InlineKeyboardMarkup:
+    """Меню интеграций"""
+    builder = InlineKeyboardBuilder()
+    
+    amocrm_status = '✅' if has_amocrm else '❌'
+    builder.button(text=f'{amocrm_status} AmoCRM', callback_data='integrations:amocrm')
+    builder.button(text='📋 Webhook API', callback_data='integrations:webhook')
+    builder.button(text='🔙 Главное меню', callback_data='menu:main')
+    
+    builder.adjust(2, 1)
+    return builder.as_markup()
+
+
+def amocrm_menu_kb(is_connected: bool = False, lang: str = 'ru') -> InlineKeyboardMarkup:
+    """Меню настройки AmoCRM"""
+    builder = InlineKeyboardBuilder()
+    
+    if is_connected:
+        builder.button(text='⚙️ Настройки воронки', callback_data='amocrm:pipeline')
+        builder.button(text='🔄 Переподключить', callback_data='amocrm:reconnect')
+        builder.button(text='❌ Отключить', callback_data='amocrm:disconnect')
+    else:
+        builder.button(text='🔗 Подключить AmoCRM', callback_data='amocrm:connect')
+    
+    builder.button(text='🔙 Назад', callback_data='menu:integrations')
+    
+    builder.adjust(1)
+    return builder.as_markup()

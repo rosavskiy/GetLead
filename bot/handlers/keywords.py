@@ -115,7 +115,7 @@ async def start_ai_keywords(callback: CallbackQuery, user: User, state: FSMConte
 
 @router.message(KeywordStates.waiting_for_ai_niche)
 async def process_ai_keywords(message: Message, user: User, state: FSMContext):
-    """Обработка AI подбора (заглушка)"""
+    """Обработка AI подбора ключевых слов"""
     if message.text == '❌ Отмена':
         await state.clear()
         await message.answer(
@@ -124,11 +124,56 @@ async def process_ai_keywords(message: Message, user: User, state: FSMContext):
         )
         return
     
-    await state.clear()
+    niche = message.text.strip()
     
-    # TODO: Интеграция с OpenAI
-    text = '🤖 AI-подбор будет доступен после интеграции с OpenAI'
-    await message.answer(text, reply_markup=main_menu_kb(user.language))
+    # Показываем сообщение о генерации
+    status_msg = await message.answer('🤖 Генерирую ключевые слова...')
+    
+    try:
+        from utils.ai_helpers import generate_keywords
+        keywords = await generate_keywords(niche)
+        
+        if not keywords:
+            await status_msg.edit_text('❌ Не удалось сгенерировать ключевые слова')
+            await state.clear()
+            return
+        
+        # Сохраняем ключевые слова
+        async with async_session_maker() as session:
+            active_project = await ProjectCRUD.get_active(session, user.id)
+            
+            if not active_project:
+                await status_msg.edit_text('❌ Проект не найден!')
+                await state.clear()
+                return
+            
+            added_count = 0
+            for keyword in keywords:
+                if keyword.strip():
+                    await KeywordCRUD.add(session, active_project.id, keyword.strip(), KeywordType.INCLUDE)
+                    added_count += 1
+            
+            # Инвалидируем кэш
+            from utils.cache import CacheService
+            await CacheService.invalidate_project_keywords(active_project.id)
+        
+        await state.clear()
+        
+        # Показываем результат
+        keywords_preview = '\n'.join([f'• {kw}' for kw in keywords[:10]])
+        text = f'✅ <b>Добавлено {added_count} ключевых слов!</b>\n\n{keywords_preview}'
+        if len(keywords) > 10:
+            text += f'\n\n... и ещё {len(keywords) - 10}'
+        
+        await status_msg.edit_text(text, parse_mode='HTML')
+        await message.answer('Вернуться в меню:', reply_markup=main_menu_kb(user.language))
+        
+    except ValueError as e:
+        await status_msg.edit_text(f'❌ Ошибка: {str(e)}')
+        await state.clear()
+    except Exception as e:
+        await status_msg.edit_text('❌ Произошла ошибка при генерации')
+        await state.clear()
 
 
 # ============ ИСКЛЮЧАЮЩИЕ СЛОВА ============

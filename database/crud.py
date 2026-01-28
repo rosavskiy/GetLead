@@ -1,11 +1,11 @@
 """CRUD операции для работы с базой данных"""
 from typing import List, Optional
 from datetime import datetime
-from sqlalchemy import select, update, delete
+from sqlalchemy import select, update, delete, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from database.models import User, Project, Keyword, Filter, Chat, KeywordType, SubscriptionPlan
+from database.models import User, Project, Keyword, Filter, Chat, KeywordType, SubscriptionPlan, LeadMatch, AmoCRMIntegration
 
 
 class UserCRUD:
@@ -183,3 +183,178 @@ class ChatCRUD:
         if chat not in project.chats:
             project.chats.append(chat)
             await session.commit()
+
+
+class LeadMatchCRUD:
+    """CRUD операции для найденных лидов"""
+    
+    @staticmethod
+    async def create(
+        session: AsyncSession,
+        user_id: int,
+        project_id: int,
+        chat_id: int,
+        message_text: str,
+        message_link: str,
+        matched_keywords: str,
+        telegram_message_id: int = None,
+        sender_username: str = None,
+        sender_id: int = None
+    ) -> LeadMatch:
+        """Создать запись о найденном лиде"""
+        lead_match = LeadMatch(
+            user_id=user_id,
+            project_id=project_id,
+            chat_id=chat_id,
+            message_text=message_text,
+            message_link=message_link,
+            matched_keywords=matched_keywords,
+            telegram_message_id=telegram_message_id,
+            sender_username=sender_username,
+            sender_id=sender_id
+        )
+        session.add(lead_match)
+        await session.commit()
+        await session.refresh(lead_match)
+        return lead_match
+    
+    @staticmethod
+    async def get_user_leads(
+        session: AsyncSession,
+        user_id: int,
+        limit: int = 50,
+        offset: int = 0
+    ) -> List[LeadMatch]:
+        """Получить лиды пользователя"""
+        result = await session.execute(
+            select(LeadMatch)
+            .where(LeadMatch.user_id == user_id)
+            .order_by(LeadMatch.created_at.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        return list(result.scalars().all())
+    
+    @staticmethod
+    async def get_user_stats(
+        session: AsyncSession,
+        user_id: int,
+        start_date: datetime = None
+    ) -> dict:
+        """Получить статистику пользователя"""
+        query = select(func.count(LeadMatch.id)).where(LeadMatch.user_id == user_id)
+        
+        if start_date:
+            query = query.where(LeadMatch.created_at >= start_date)
+        
+        total = await session.execute(query)
+        total = total.scalar() or 0
+        
+        contacted = await session.execute(
+            query.where(LeadMatch.is_contacted == True)
+        )
+        contacted = contacted.scalar() or 0
+        
+        converted = await session.execute(
+            query.where(LeadMatch.is_converted == True)
+        )
+        converted = converted.scalar() or 0
+        
+        return {
+            'total': total,
+            'contacted': contacted,
+            'converted': converted,
+            'conversion_rate': (converted / total * 100) if total > 0 else 0
+        }
+    
+    @staticmethod
+    async def mark_contacted(session: AsyncSession, lead_id: int) -> bool:
+        """Отметить лид как обработанный"""
+        await session.execute(
+            update(LeadMatch)
+            .where(LeadMatch.id == lead_id)
+            .values(is_contacted=True)
+        )
+        await session.commit()
+        return True
+    
+    @staticmethod
+    async def mark_converted(session: AsyncSession, lead_id: int) -> bool:
+        """Отметить лид как конвертированный"""
+        await session.execute(
+            update(LeadMatch)
+            .where(LeadMatch.id == lead_id)
+            .values(is_converted=True)
+        )
+        await session.commit()
+        return True
+
+
+class AmoCRMCRUD:
+    """CRUD операции для интеграции AmoCRM"""
+    
+    @staticmethod
+    async def get_by_user(session: AsyncSession, user_id: int) -> Optional[AmoCRMIntegration]:
+        """Получить интеграцию пользователя"""
+        result = await session.execute(
+            select(AmoCRMIntegration).where(AmoCRMIntegration.user_id == user_id)
+        )
+        return result.scalar_one_or_none()
+    
+    @staticmethod
+    async def create_or_update(
+        session: AsyncSession,
+        user_id: int,
+        subdomain: str,
+        access_token: str,
+        refresh_token: str,
+        expires_at: datetime,
+        pipeline_id: int = None,
+        status_id: int = None,
+        responsible_user_id: int = None
+    ) -> AmoCRMIntegration:
+        """Создать или обновить интеграцию"""
+        existing = await AmoCRMCRUD.get_by_user(session, user_id)
+        
+        if existing:
+            await session.execute(
+                update(AmoCRMIntegration)
+                .where(AmoCRMIntegration.user_id == user_id)
+                .values(
+                    subdomain=subdomain,
+                    access_token=access_token,
+                    refresh_token=refresh_token,
+                    token_expires_at=expires_at,
+                    pipeline_id=pipeline_id,
+                    status_id=status_id,
+                    responsible_user_id=responsible_user_id,
+                    is_active=True
+                )
+            )
+            await session.commit()
+            await session.refresh(existing)
+            return existing
+        
+        integration = AmoCRMIntegration(
+            user_id=user_id,
+            subdomain=subdomain,
+            access_token=access_token,
+            refresh_token=refresh_token,
+            token_expires_at=expires_at,
+            pipeline_id=pipeline_id,
+            status_id=status_id,
+            responsible_user_id=responsible_user_id
+        )
+        session.add(integration)
+        await session.commit()
+        await session.refresh(integration)
+        return integration
+    
+    @staticmethod
+    async def delete(session: AsyncSession, user_id: int) -> bool:
+        """Удалить интеграцию"""
+        await session.execute(
+            delete(AmoCRMIntegration).where(AmoCRMIntegration.user_id == user_id)
+        )
+        await session.commit()
+        return True
