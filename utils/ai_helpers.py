@@ -8,7 +8,12 @@ from config import settings
 
 logger = logging.getLogger(__name__)
 
-client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY) if settings.OPENAI_API_KEY else None
+
+def get_openai_client() -> Optional[AsyncOpenAI]:
+    """Создаёт OpenAI клиент по требованию (избегаем проблем с глобальным клиентом)"""
+    if settings.OPENAI_API_KEY:
+        return AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+    return None
 
 # Встроенная база популярных чатов по категориям (бесплатно!)
 CHAT_DATABASE = {
@@ -176,10 +181,12 @@ async def generate_keywords(niche: str) -> List[str]:
     Returns:
         Список ключевых слов
     """
+    client = get_openai_client()
     if not client:
         raise ValueError("OpenAI API key не настроен")
     
-    prompt = f"""Ты - эксперт по лидогенерации в Telegram.
+    try:
+        prompt = f"""Ты - эксперт по лидогенерации в Telegram.
 
 Дана ниша: "{niche}"
 
@@ -193,20 +200,22 @@ async def generate_keywords(niche: str) -> List[str]:
 
 Верни ТОЛЬКО список слов/фраз, каждое с новой строки, без нумерации и пояснений."""
 
-    response = await client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {"role": "system", "content": "Ты - помощник для генерации ключевых слов для поиска лидов."},
-            {"role": "user", "content": prompt}
-        ],
-        temperature=0.7,
-        max_tokens=500
-    )
-    
-    keywords_text = response.choices[0].message.content.strip()
-    keywords = [kw.strip() for kw in keywords_text.split('\n') if kw.strip()]
-    
-    return keywords
+        response = await client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "Ты - помощник для генерации ключевых слов для поиска лидов."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.7,
+            max_tokens=500
+        )
+        
+        keywords_text = response.choices[0].message.content.strip()
+        keywords = [kw.strip() for kw in keywords_text.split('\n') if kw.strip()]
+        
+        return keywords
+    finally:
+        await client.close()
 
 
 async def generate_exclude_words(niche: str) -> List[str]:
@@ -219,10 +228,12 @@ async def generate_exclude_words(niche: str) -> List[str]:
     Returns:
         Список исключающих слов
     """
+    client = get_openai_client()
     if not client:
         raise ValueError("OpenAI API key не настроен")
     
-    prompt = f"""Ты - эксперт по фильтрации спама в Telegram.
+    try:
+        prompt = f"""Ты - эксперт по фильтрации спама в Telegram.
 
 Дана ниша: "{niche}"
 
@@ -235,20 +246,22 @@ async def generate_exclude_words(niche: str) -> List[str]:
 
 Верни ТОЛЬКО список слов, каждое с новой строки, без нумерации и пояснений."""
 
-    response = await client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {"role": "system", "content": "Ты - помощник для генерации исключающих слов."},
-            {"role": "user", "content": prompt}
-        ],
-        temperature=0.7,
-        max_tokens=300
-    )
-    
-    words_text = response.choices[0].message.content.strip()
-    words = [w.strip() for w in words_text.split('\n') if w.strip()]
-    
-    return words
+        response = await client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "Ты - помощник для генерации исключающих слов."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.7,
+            max_tokens=300
+        )
+        
+        words_text = response.choices[0].message.content.strip()
+        words = [w.strip() for w in words_text.split('\n') if w.strip()]
+        
+        return words
+    finally:
+        await client.close()
 
 
 async def suggest_chats(niche: str) -> List[dict]:
@@ -295,7 +308,7 @@ async def suggest_chats(niche: str) -> List[dict]:
             logger.warning(f"Telemetr search failed: {e}")
         
         # 4. Если есть OpenAI и мало результатов, дополняем AI-предложениями
-        if client and len(results) < 10:
+        if settings.OPENAI_API_KEY and len(results) < 10:
             try:
                 ai_suggestions = await suggest_chat_names_ai(niche)
                 for name in ai_suggestions[:5]:
@@ -333,10 +346,12 @@ async def suggest_chat_names_ai(niche: str) -> List[str]:
     Returns:
         Список предполагаемых названий чатов
     """
+    client = get_openai_client()
     if not client:
         return []
     
-    prompt = f"""Дана ниша: "{niche}"
+    try:
+        prompt = f"""Дана ниша: "{niche}"
 
 Предложи 5-7 типичных названий Telegram-чатов и каналов, где могут обсуждаться заказы/вакансии/сделки в этой нише.
 
@@ -347,20 +362,22 @@ async def suggest_chat_names_ai(niche: str) -> List[str]:
 
 Верни ТОЛЬКО список названий, каждое с новой строки, без @, без пояснений."""
 
-    response = await client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {"role": "system", "content": "Ты - помощник для поиска Telegram-чатов."},
-            {"role": "user", "content": prompt}
-        ],
-        temperature=0.7,
-        max_tokens=300
-    )
-    
-    chats_text = response.choices[0].message.content.strip()
-    chats = [c.strip() for c in chats_text.split('\n') if c.strip()]
-    
-    return chats
+        response = await client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "Ты - помощник для поиска Telegram-чатов."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.7,
+            max_tokens=300
+        )
+        
+        chats_text = response.choices[0].message.content.strip()
+        chats = [c.strip() for c in chats_text.split('\n') if c.strip()]
+        
+        return chats
+    finally:
+        await client.close()
 
 
 async def generate_filters(niche: str, keywords: List[str]) -> List[str]:
@@ -374,12 +391,14 @@ async def generate_filters(niche: str, keywords: List[str]) -> List[str]:
     Returns:
         Список логических фильтров
     """
+    client = get_openai_client()
     if not client:
         raise ValueError("OpenAI API key не настроен")
     
-    keywords_str = ', '.join(keywords[:10])  # Берем первые 10
-    
-    prompt = f"""Ты - эксперт по созданию поисковых фильтров.
+    try:
+        keywords_str = ', '.join(keywords[:10])  # Берем первые 10
+        
+        prompt = f"""Ты - эксперт по созданию поисковых фильтров.
 
 Дана ниша: "{niche}"
 Ключевые слова: {keywords_str}
@@ -397,17 +416,19 @@ async def generate_filters(niche: str, keywords: List[str]) -> List[str]:
 
 Верни ТОЛЬКО список фильтров, каждый с новой строки, без пояснений."""
 
-    response = await client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {"role": "system", "content": "Ты - помощник для создания поисковых фильтров."},
-            {"role": "user", "content": prompt}
-        ],
-        temperature=0.7,
-        max_tokens=300
-    )
-    
-    filters_text = response.choices[0].message.content.strip()
-    filters = [f.strip() for f in filters_text.split('\n') if f.strip()]
-    
-    return filters
+        response = await client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "Ты - помощник для создания поисковых фильтров."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.7,
+            max_tokens=300
+        )
+        
+        filters_text = response.choices[0].message.content.strip()
+        filters = [f.strip() for f in filters_text.split('\n') if f.strip()]
+        
+        return filters
+    finally:
+        await client.close()
