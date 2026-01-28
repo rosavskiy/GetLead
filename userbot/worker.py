@@ -417,6 +417,23 @@ class UserbotWorker:
                 logger.info(f"🔎 Matching result: matched={result['matched']}, keywords={[getattr(k, 'text', k) for k in result.get('keywords', [])]}")
                 
                 if result['matched']:
+                    # AI-валидация intent (проверяем что это реальный лид)
+                    from utils.ai_helpers import validate_lead_intent
+                    
+                    matched_kw_texts = [getattr(k, 'text', str(k)) for k in result['keywords']]
+                    ai_result = await validate_lead_intent(
+                        message_text=text,
+                        matched_keywords=matched_kw_texts,
+                        business_context=project.name  # Название проекта как контекст
+                    )
+                    
+                    logger.info(f"🤖 AI validation: is_lead={ai_result['is_lead']}, intent={ai_result['intent']}, reason={ai_result['reason']}")
+                    
+                    # Если AI считает что это не лид - пропускаем
+                    if not ai_result['is_lead']:
+                        logger.info(f"⏭️ Пропускаем - AI определил как не лид: {ai_result['reason']}")
+                        return
+                    
                     message_link = self.get_message_link(event)
                     
                     # Получаем информацию об отправителе

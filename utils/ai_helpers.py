@@ -91,6 +91,97 @@ def get_openai_client() -> Optional[AsyncOpenAI]:
         )
     return None
 
+
+async def validate_lead_intent(
+    message_text: str,
+    matched_keywords: List[str],
+    business_context: str = ""
+) -> Dict[str, Any]:
+    """
+    AI-валидация intent сообщения.
+    Проверяет действительно ли человек ИЩЕТ услугу, а не просто упоминает тему.
+    
+    Args:
+        message_text: Текст сообщения
+        matched_keywords: Найденные ключевые слова
+        business_context: Контекст бизнеса (например "визовые услуги")
+        
+    Returns:
+        {
+            'is_lead': True/False,
+            'confidence': 0.0-1.0,
+            'intent': 'searching'|'offering'|'discussing'|'completed'|'spam',
+            'reason': str
+        }
+    """
+    client = get_openai_client()
+    
+    if not client:
+        # Если нет OpenAI ключа - пропускаем валидацию
+        return {
+            'is_lead': True,
+            'confidence': 0.5,
+            'intent': 'unknown',
+            'reason': 'AI validation disabled'
+        }
+    
+    try:
+        prompt = f"""Проанализируй сообщение из чата и определи intent автора.
+
+Сообщение: "{message_text}"
+
+Найденные ключевые слова: {', '.join(matched_keywords)}
+{f"Контекст бизнеса: {business_context}" if business_context else ""}
+
+Определи:
+1. Автор ИЩЕТ услугу/товар (потенциальный клиент)?
+2. Или он ПРЕДЛАГАЕТ услугу (конкурент)?
+3. Или просто ОБСУЖДАЕТ тему (не лид)?
+4. Или уже ПОЛУЧИЛ услугу (поздно)?
+5. Или это СПАМ/реклама?
+
+Ответь ТОЛЬКО в формате JSON:
+{{
+    "is_lead": true/false,
+    "confidence": 0.0-1.0,
+    "intent": "searching" | "offering" | "discussing" | "completed" | "spam",
+    "reason": "краткое объяснение на русском"
+}}"""
+
+        response = await client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "Ты аналитик лидов. Отвечай ТОЛЬКО JSON без markdown."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.1,
+            max_tokens=200
+        )
+        
+        result_text = response.choices[0].message.content.strip()
+        
+        # Убираем markdown если есть
+        if result_text.startswith('```'):
+            result_text = re.sub(r'^```\w*\n?', '', result_text)
+            result_text = re.sub(r'\n?```$', '', result_text)
+        
+        result = json.loads(result_text)
+        
+        logger.info(f"AI intent validation: {result['intent']} (confidence: {result['confidence']}) - {result['reason']}")
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"AI validation error: {e}")
+        # При ошибке - пропускаем (лучше false positive чем пропустить лида)
+        return {
+            'is_lead': True,
+            'confidence': 0.3,
+            'intent': 'unknown',
+            'reason': f'AI error: {str(e)}'
+        }
+
+
 # База данных пуста - все чаты ищутся через Telegram API
 CHAT_DATABASE = {}
 
