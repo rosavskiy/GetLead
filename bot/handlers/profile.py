@@ -4,12 +4,13 @@ from datetime import datetime, timedelta
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
-from sqlalchemy import select, func
+from sqlalchemy import select, func, update
 
 from database.database import async_session_maker
 from database.models import User, Project, LeadMatch, Chat, SubscriptionPlan
 from database.crud import ProjectCRUD
-from bot.keyboards import profile_menu_kb, stats_period_kb, back_to_main_kb
+from bot.keyboards import profile_menu_kb, stats_period_kb, back_to_main_kb, settings_menu_kb
+from bot.texts import get_text
 from utils.subscription_helpers import get_subscription_limits
 
 router = Router()
@@ -18,6 +19,8 @@ router = Router()
 @router.callback_query(F.data == 'menu:profile')
 async def show_profile(callback: CallbackQuery, user: User):
     """Показать личный кабинет пользователя"""
+    lang = user.language
+    
     async with async_session_maker() as session:
         # Получаем статистику
         projects_count = await session.execute(
@@ -59,51 +62,43 @@ async def show_profile(callback: CallbackQuery, user: User):
     # Лимиты тарифа
     limits = get_subscription_limits(user.subscription_plan)
     
-    # Формируем текст профиля
-    plan_names = {
-        SubscriptionPlan.FREE: '🆓 Бесплатный',
-        SubscriptionPlan.FREELANCER: '💼 Фрилансер',
-        SubscriptionPlan.STANDARD: '📊 Стандарт',
-        SubscriptionPlan.STARTUP: '🚀 Стартап',
-        SubscriptionPlan.COMPANY: '🏢 Компания'
-    }
+    # Названия тарифов
+    plan_name = get_text(f'plan_{user.subscription_plan.name.lower()}', lang)
     
-    plan_name = plan_names.get(user.subscription_plan, 'Неизвестный')
-    
-    text = f"""👤 <b>Личный кабинет</b>
+    text = f"""{get_text('profile_title', lang)}
 
-📱 <b>ID:</b> <code>{user.telegram_id}</code>
-👤 <b>Username:</b> @{user.username or 'не указан'}
-📅 <b>Регистрация:</b> {user.created_at.strftime('%d.%m.%Y')}
+{get_text('profile_id', lang)} <code>{user.telegram_id}</code>
+{get_text('profile_username', lang)} @{user.username or ('не указан' if lang == 'ru' else 'not set')}
+{get_text('profile_registered', lang)} {user.created_at.strftime('%d.%m.%Y')}
 
 ━━━━━━━━━━━━━━━━━━━━
 
-💳 <b>Тариф:</b> {plan_name}"""
+{get_text('profile_plan', lang)} {plan_name}"""
     
     if user.subscription_plan != SubscriptionPlan.FREE:
         if user.subscription_end_date:
             days_left = (user.subscription_end_date - datetime.utcnow()).days
-            text += f"\n⏳ <b>До окончания:</b> {days_left} дней"
-            text += f"\n📆 <b>Истекает:</b> {user.subscription_end_date.strftime('%d.%m.%Y')}"
+            text += f"\n{get_text('profile_expires', lang)} {get_text('days_left', lang).format(days_left)}"
+            text += f"\n{get_text('profile_expires_date', lang)} {user.subscription_end_date.strftime('%d.%m.%Y')}"
     
     text += f"""
 
 ━━━━━━━━━━━━━━━━━━━━
 
-📊 <b>Статистика</b>
+{get_text('profile_stats', lang)}
 
-📁 <b>Проектов:</b> {projects_count}
-💬 <b>Чатов:</b> {chats_count}/{limits['max_chats'] if limits['max_chats'] > 0 else '∞'}
+{get_text('profile_projects', lang)} {projects_count}
+{get_text('profile_chats', lang)} {chats_count}/{limits['max_chats'] if limits['max_chats'] > 0 else '∞'}
 
-🎯 <b>Найдено лидов:</b>
-   • Сегодня: <b>{today_leads}</b>
-   • За неделю: <b>{week_leads}</b>
-   • Всего: <b>{total_leads}</b>
+{get_text('profile_leads', lang)}
+   • {get_text('profile_today', lang)}: <b>{today_leads}</b>
+   • {get_text('profile_week', lang)}: <b>{week_leads}</b>
+   • {get_text('profile_total', lang)}: <b>{total_leads}</b>
 """
     
     await callback.message.edit_text(
         text,
-        reply_markup=profile_menu_kb(user.language),
+        reply_markup=profile_menu_kb(lang),
         parse_mode='HTML'
     )
     await callback.answer()
@@ -112,13 +107,14 @@ async def show_profile(callback: CallbackQuery, user: User):
 @router.callback_query(F.data == 'profile:stats')
 async def show_detailed_stats(callback: CallbackQuery, user: User):
     """Показать детальную статистику"""
-    text = """📊 <b>Детальная статистика</b>
+    lang = user.language
+    text = f"""{get_text('stats_title', lang)}
 
-Выберите период для просмотра:"""
+{get_text('stats_choose_period', lang)}"""
     
     await callback.message.edit_text(
         text,
-        reply_markup=stats_period_kb(user.language),
+        reply_markup=stats_period_kb(lang),
         parse_mode='HTML'
     )
     await callback.answer()
@@ -127,22 +123,28 @@ async def show_detailed_stats(callback: CallbackQuery, user: User):
 @router.callback_query(F.data.startswith('stats:period:'))
 async def show_stats_by_period(callback: CallbackQuery, user: User):
     """Показать статистику за период"""
+    lang = user.language
     period = callback.data.split(':')[2]
     
     # Определяем даты периода
     now = datetime.utcnow()
+    period_names = {
+        'today': get_text('profile_today', lang).lower(),
+        'week': get_text('profile_week', lang).lower(),
+        'month': get_text('stats_month', lang).lower().replace('🗓 ', ''),
+        'all': get_text('stats_all_time', lang).lower().replace('📊 ', '')
+    }
+    
     if period == 'today':
         start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        period_name = 'сегодня'
     elif period == 'week':
         start_date = now - timedelta(days=7)
-        period_name = 'за неделю'
     elif period == 'month':
         start_date = now - timedelta(days=30)
-        period_name = 'за месяц'
     else:  # all
         start_date = datetime(2020, 1, 1)
-        period_name = 'за всё время'
+    
+    period_name = period_names.get(period, '')
     
     async with async_session_maker() as session:
         # Общее количество лидов
@@ -205,37 +207,37 @@ async def show_stats_by_period(callback: CallbackQuery, user: User):
     # Формируем текст
     conversion_rate = (contacted_leads/total_leads*100) if total_leads > 0 else 0
     
-    text = f"""📊 <b>Статистика {period_name}</b>
+    text = f"""📊 <b>{get_text('stats_title', lang).replace('📊 <b>', '').replace('</b>', '')} {period_name}</b>
 
-🎯 <b>Всего лидов:</b> {total_leads}
-📞 <b>Обработано:</b> {contacted_leads} ({conversion_rate:.1f}%)
-✅ <b>Конвертировано:</b> {converted_leads}
+{get_text('stats_total_leads', lang)} {total_leads}
+{get_text('stats_processed', lang)} {contacted_leads} ({conversion_rate:.1f}%)
+{get_text('stats_converted', lang)} {converted_leads}
 
 ━━━━━━━━━━━━━━━━━━━━
 
-📁 <b>По проектам:</b>
+{get_text('stats_by_projects', lang)}
 """
     
     if projects_stats:
         for name, count in projects_stats[:5]:
-            text += f"• {name}: <b>{count}</b> лидов\n"
+            text += f"• {name}: <b>{count}</b> {get_text('stats_leads_suffix', lang)}\n"
     else:
-        text += "Нет данных\n"
+        text += get_text('stats_no_data', lang) + "\n"
     
-    text += "\n💬 <b>Топ-5 чатов:</b>\n"
+    text += f"\n{get_text('stats_top_chats', lang)}\n"
     
     if chats_stats:
         for title, count in chats_stats:
-            title = title or 'Без названия'
+            title = title or ('Без названия' if lang == 'ru' else 'Untitled')
             if len(title) > 25:
                 title = title[:22] + '...'
             text += f"• {title}: <b>{count}</b>\n"
     else:
-        text += "Нет данных\n"
+        text += get_text('stats_no_data', lang) + "\n"
     
     await callback.message.edit_text(
         text,
-        reply_markup=back_to_main_kb(user.language),
+        reply_markup=back_to_main_kb(lang),
         parse_mode='HTML'
     )
     await callback.answer()
@@ -244,6 +246,8 @@ async def show_stats_by_period(callback: CallbackQuery, user: User):
 @router.callback_query(F.data == 'profile:leads')
 async def show_recent_leads(callback: CallbackQuery, user: User):
     """Показать последние найденные лиды"""
+    lang = user.language
+    
     async with async_session_maker() as session:
         # Получаем последние 10 лидов
         result = await session.execute(
@@ -255,10 +259,10 @@ async def show_recent_leads(callback: CallbackQuery, user: User):
         leads = result.scalars().all()
     
     if not leads:
-        await callback.answer('У вас пока нет найденных лидов', show_alert=True)
+        await callback.answer(get_text('leads_none', lang), show_alert=True)
         return
     
-    text = "🎯 <b>Последние лиды</b>\n\n"
+    text = f"{get_text('leads_title', lang)}\n\n"
     
     for lead in leads:
         # Обрезаем текст сообщения
@@ -276,13 +280,13 @@ async def show_recent_leads(callback: CallbackQuery, user: User):
         text += f"""{status} <b>{lead.created_at.strftime('%d.%m %H:%M')}</b>
 🔑 {keywords_str}
 💬 {msg_text}
-🔗 <a href="{lead.message_link}">Перейти</a>
+🔗 <a href="{lead.message_link}">{get_text('leads_go_to', lang)}</a>
 
 """
     
     await callback.message.edit_text(
         text,
-        reply_markup=back_to_main_kb(user.language),
+        reply_markup=back_to_main_kb(lang),
         parse_mode='HTML',
         disable_web_page_preview=True
     )
@@ -292,30 +296,30 @@ async def show_recent_leads(callback: CallbackQuery, user: User):
 @router.callback_query(F.data == 'profile:settings')
 async def show_settings(callback: CallbackQuery, user: User):
     """Показать настройки пользователя"""
+    lang = user.language
     
     # Проверяем интеграцию AmoCRM
     async with async_session_maker() as session:
         from database.crud import AmoCRMCRUD
         amocrm = await AmoCRMCRUD.get_by_user(session, user.id)
     
-    amocrm_status = '✅ Подключен' if amocrm and amocrm.is_active else '❌ Не подключен'
+    amocrm_status = get_text('amocrm_connected', lang) if amocrm and amocrm.is_active else get_text('amocrm_disconnected', lang)
+    lang_display = get_text('lang_russian', lang) if user.language == 'ru' else get_text('lang_english', lang)
     
-    text = f"""⚙️ <b>Настройки</b>
+    text = f"""{get_text('settings_title', lang)}
 
-🌐 <b>Язык:</b> {'Русский 🇷🇺' if user.language == 'ru' else 'English 🇬🇧'}
+{get_text('settings_language', lang)} {lang_display}
 
-🔔 <b>Уведомления:</b> Включены
+{get_text('settings_notifications', lang)} {get_text('notifications_enabled', lang)}
 
-🔗 <b>Интеграции:</b>
+{get_text('settings_integrations', lang)}
 • AmoCRM: {amocrm_status}
 
-💡 Для настройки интеграций используйте меню ниже."""
-    
-    from bot.keyboards import settings_menu_kb
+{get_text('settings_tip', lang)}"""
     
     await callback.message.edit_text(
         text,
-        reply_markup=settings_menu_kb(user.language),
+        reply_markup=settings_menu_kb(lang),
         parse_mode='HTML'
     )
     await callback.answer()
@@ -324,6 +328,7 @@ async def show_settings(callback: CallbackQuery, user: User):
 @router.callback_query(F.data == 'settings:language')
 async def show_language_settings(callback: CallbackQuery, user: User):
     """Показать выбор языка"""
+    lang = user.language
     from aiogram.utils.keyboard import InlineKeyboardBuilder
     
     builder = InlineKeyboardBuilder()
@@ -333,12 +338,10 @@ async def show_language_settings(callback: CallbackQuery, user: User):
     
     builder.button(text=f'{ru_check} 🇷🇺 Русский', callback_data='lang:ru')
     builder.button(text=f'{en_check} 🇬🇧 English', callback_data='lang:en')
-    builder.button(text='🔙 Назад', callback_data='profile:settings')
+    builder.button(text=get_text('btn_back', lang), callback_data='profile:settings')
     builder.adjust(2, 1)
     
-    text = """🌐 <b>Выбор языка</b>
-
-Выберите язык интерфейса:"""
+    text = get_text('choose_language_title', lang)
     
     await callback.message.edit_text(
         text,
@@ -354,7 +357,6 @@ async def change_language(callback: CallbackQuery, user: User):
     new_lang = callback.data.split(':')[1]
     
     async with async_session_maker() as session:
-        from sqlalchemy import update
         from database.models import User as UserModel
         
         await session.execute(
@@ -367,8 +369,8 @@ async def change_language(callback: CallbackQuery, user: User):
     # Обновляем язык в объекте user для текущего запроса
     user.language = new_lang
     
-    lang_name = 'Русский 🇷🇺' if new_lang == 'ru' else 'English 🇬🇧'
-    await callback.answer(f'✅ Язык изменён на {lang_name}')
+    lang_name = get_text('lang_russian', new_lang) if new_lang == 'ru' else get_text('lang_english', new_lang)
+    await callback.answer(get_text('language_changed', new_lang).format(lang_name))
     
     # Возвращаемся в настройки
     await show_settings(callback, user)
@@ -377,26 +379,23 @@ async def change_language(callback: CallbackQuery, user: User):
 @router.callback_query(F.data == 'settings:notifications')
 async def show_notifications_settings(callback: CallbackQuery, user: User):
     """Показать настройки уведомлений"""
+    lang = user.language
     from aiogram.utils.keyboard import InlineKeyboardBuilder
     
     builder = InlineKeyboardBuilder()
-    builder.button(text='✅ Все уведомления', callback_data='notif:all')
-    builder.button(text='🔕 Только важные', callback_data='notif:important')
-    builder.button(text='❌ Отключить', callback_data='notif:off')
-    builder.button(text='🔙 Назад', callback_data='profile:settings')
+    builder.button(text=get_text('btn_notif_all', lang), callback_data='notif:all')
+    builder.button(text=get_text('btn_notif_important', lang), callback_data='notif:important')
+    builder.button(text=get_text('btn_notif_off', lang), callback_data='notif:off')
+    builder.button(text=get_text('btn_back', lang), callback_data='profile:settings')
     builder.adjust(1)
     
-    text = """🔔 <b>Настройки уведомлений</b>
+    text = f"""{get_text('notifications_title', lang)}
 
-Текущий статус: <b>Все уведомления включены</b>
+{get_text('notifications_current', lang)} <b>{get_text('notifications_all', lang)}</b>
 
-Выберите режим уведомлений:
+{get_text('notifications_desc', lang)}
 
-• <b>Все уведомления</b> — получать уведомления о каждом найденном лиде
-• <b>Только важные</b> — уведомления раз в час со сводкой
-• <b>Отключить</b> — не получать уведомления (лиды сохраняются)
-
-⚠️ Функция настройки режимов в разработке"""
+⚠️ {'Функция в разработке' if lang == 'ru' else 'Feature in development'}"""
     
     await callback.message.edit_text(
         text,
@@ -409,14 +408,16 @@ async def show_notifications_settings(callback: CallbackQuery, user: User):
 @router.callback_query(F.data.startswith('notif:'))
 async def change_notifications(callback: CallbackQuery, user: User):
     """Сменить режим уведомлений (заглушка)"""
+    lang = user.language
     mode = callback.data.split(':')[1]
     
     modes = {
-        'all': 'Все уведомления',
-        'important': 'Только важные',
-        'off': 'Отключены'
+        'all': get_text('notifications_all', lang),
+        'important': get_text('notifications_important', lang),
+        'off': get_text('notifications_off', lang)
     }
     
     # TODO: Сохранить настройку в БД (нужно добавить поле в модель User)
-    await callback.answer(f'✅ Режим: {modes.get(mode, "Все")}. Функция в разработке.', show_alert=True)
+    msg = get_text('notif_mode_set', lang).format(modes.get(mode, '')) + (' Функция в разработке.' if lang == 'ru' else ' Feature in development.')
+    await callback.answer(msg, show_alert=True)
 
