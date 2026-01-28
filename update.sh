@@ -15,7 +15,6 @@ NC='\033[0m' # No Color
 
 # Конфигурация
 PROJECT_DIR="/home/getlead"
-BACKUP_DIR="/home/getlead/backups"
 LOG_FILE="/home/getlead/update.log"
 
 # Функции для логирования
@@ -43,28 +42,7 @@ log "=========================================="
 log "Начало обновления GetLead"
 log "=========================================="
 
-# 1. Создание бэкапа (опционально)
-log "Создание бэкапа текущей версии..."
-BACKUP_NAME="backup_$(date '+%Y%m%d_%H%M%S')"
-mkdir -p "$BACKUP_DIR"
-
-# Копируем только важные файлы (не node_modules, venv и т.д.)
-tar -czf "$BACKUP_DIR/$BACKUP_NAME.tar.gz" \
-    --exclude='venv' \
-    --exclude='__pycache__' \
-    --exclude='*.pyc' \
-    --exclude='*.session' \
-    --exclude='.git' \
-    . 2>/dev/null || warning "Бэкап создан с предупреждениями"
-
-log "Бэкап создан: $BACKUP_DIR/$BACKUP_NAME.tar.gz"
-
-# Удаляем старые бэкапы (храним только последние 5)
-cd "$BACKUP_DIR"
-ls -t | tail -n +6 | xargs -r rm --
-cd "$PROJECT_DIR"
-
-# 2. Проверка обновлений
+# 1. Проверка обновлений
 log "Проверка обновлений из GitHub..."
 git fetch origin
 
@@ -85,15 +63,14 @@ else
     exit 1
 fi
 
-# 3. Получение обновлений
+# 2. Получение обновлений
 log "Скачивание обновлений..."
 git pull origin main || {
-    error "Ошибка при git pull. Откат к бэкапу..."
-    tar -xzf "$BACKUP_DIR/$BACKUP_NAME.tar.gz" -C "$PROJECT_DIR"
+    error "Ошибка при git pull"
     exit 1
 }
 
-# 4. Проверка изменений в requirements.txt или новых Python файлов
+# 3. Проверка изменений в requirements.txt или новых Python файлов
 NEED_DEPS_UPDATE=false
 
 if git diff HEAD@{1} HEAD --name-only | grep -q "requirements.txt"; then
@@ -121,7 +98,7 @@ else
     log "Зависимости не изменились, пропускаем обновление"
 fi
 
-# 5. Проверка изменений в моделях БД и применение миграций
+# 4. Проверка изменений в моделях БД и применение миграций
 if git diff HEAD@{1} HEAD --name-only | grep -q "database/models.py"; then
     warning "⚠️  Обнаружены изменения в моделях БД!"
     log "Применение миграций..."
@@ -149,7 +126,7 @@ if git diff HEAD@{1} HEAD --name-only | grep -q "database/models.py"; then
     log "✅ Миграция БД завершена"
 fi
 
-# 6. Перезапуск сервисов
+# 5. Перезапуск сервисов
 log "Перезапуск сервисов..."
 
 # Останавливаем сервисы
@@ -180,7 +157,7 @@ else
     exit 1
 fi
 
-# 7. Проверка здоровья приложения
+# 6. Проверка здоровья приложения
 log "Проверка работоспособности..."
 sleep 5
 
@@ -197,7 +174,7 @@ else
     error "❌ Userbot процесс не найден"
 fi
 
-# 8. Очистка
+# 7. Очистка
 log "Очистка временных файлов..."
 find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
 find . -type f -name "*.pyc" -delete 2>/dev/null || true
