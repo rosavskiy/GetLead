@@ -172,7 +172,7 @@ async def process_ai_chats(message: Message, user: User, state: FSMContext):
     lang = user.language
     
     # Показываем сообщение о генерации
-    searching_text = '🔍 Ищу активные чаты с 1000+ участников...' if lang == 'ru' else '🔍 Searching for active chats with 1000+ members...'
+    searching_text = '🔍 Ищу реальные чаты через Telegram...' if lang == 'ru' else '🔍 Searching real chats via Telegram...'
     status_msg = await message.answer(searching_text)
     
     try:
@@ -180,7 +180,7 @@ async def process_ai_chats(message: Message, user: User, state: FSMContext):
         chat_suggestions = await suggest_chats(niche)
         
         if not chat_suggestions:
-            err_text = '❌ Не удалось найти активные чаты для этой ниши' if lang == 'ru' else '❌ Could not find active chats for this niche'
+            err_text = '❌ Не удалось найти чаты для этой ниши.\nПопробуйте другие ключевые слова.' if lang == 'ru' else '❌ Could not find chats for this niche.\nTry different keywords.'
             await status_msg.edit_text(err_text)
             await state.clear()
             return
@@ -189,51 +189,48 @@ async def process_ai_chats(message: Message, user: User, state: FSMContext):
         
         # Показываем результат
         if lang == 'ru':
-            text = f'🎯 <b>Активные чаты для ниши "{niche}"</b>\n'
-            text += f'<i>Отсортированы по количеству участников</i>\n\n'
+            text = f'🎯 <b>Чаты для ниши "{niche}"</b>\n\n'
         else:
-            text = f'🎯 <b>Active chats for niche "{niche}"</b>\n'
-            text += f'<i>Sorted by member count</i>\n\n'
+            text = f'🎯 <b>Chats for niche "{niche}"</b>\n\n'
         
         # Группируем по источнику
-        web_chats = []  # Чаты с реальной статистикой (telemetr/tgstat)
-        db_chats = []   # Чаты из базы
-        ai_suggestions = []  # AI предложения
+        verified_chats = []  # 100% существующие (через Telegram API)
+        web_chats = []       # Из веб-парсинга (не проверены)
         
         for chat in chat_suggestions:
-            source = chat.get('source', 'unknown')
-            if source in ('telemetr', 'tgstat'):
-                web_chats.append(chat)
-            elif source == 'database':
-                db_chats.append(chat)
+            if chat.get('verified', False):
+                verified_chats.append(chat)
             else:
-                ai_suggestions.append(chat)
+                web_chats.append(chat)
         
-        # Чаты с реальной статистикой (приоритет)
+        # Верифицированные чаты (найдены через Telegram - 100% существуют!)
+        if verified_chats:
+            header = '✅ <b>Проверенные чаты:</b>' if lang == 'ru' else '✅ <b>Verified chats:</b>'
+            text += f'{header}\n'
+            for chat in verified_chats[:15]:
+                title = chat.get('title', chat['username'])
+                subs = chat.get('subscribers')
+                if subs:
+                    subs_str = f" • <b>{format_subscribers(subs)}</b>"
+                else:
+                    subs_str = ""
+                
+                # Тип чата
+                chat_type = chat.get('type', '')
+                type_emoji = ''
+                if chat_type == 'channel':
+                    type_emoji = '📢 '
+                elif chat_type in ('supergroup', 'group'):
+                    type_emoji = '👥 '
+                
+                text += f"• {type_emoji}<a href=\"https://{chat['link']}\">{title}</a>{subs_str}\n"
+            text += '\n'
+        
+        # Чаты из веб-парсинга (непроверенные)
         if web_chats:
-            header = '🔥 <b>Популярные чаты (проверено):</b>' if lang == 'ru' else '🔥 <b>Popular chats (verified):</b>'
+            header = '🔍 <b>Найдено в сети (требует проверки):</b>' if lang == 'ru' else '🔍 <b>Found online (needs verification):</b>'
             text += f'{header}\n'
-            for chat in web_chats[:10]:
-                subs = chat.get('subscribers')
-                subs_str = f" • <b>{format_subscribers(subs)}</b>" if subs else ""
-                text += f"• <a href=\"https://{chat['link']}\">{chat['username']}</a>{subs_str}\n"
-            text += '\n'
-        
-        # Чаты из базы
-        if db_chats:
-            header = '📚 <b>Рекомендуемые чаты:</b>' if lang == 'ru' else '📚 <b>Recommended chats:</b>'
-            text += f'{header}\n'
-            for chat in db_chats[:8]:
-                subs = chat.get('subscribers')
-                subs_str = f" • ~{format_subscribers(subs)}" if subs else ""
-                text += f"• <a href=\"https://{chat['link']}\">{chat['username']}</a>{subs_str}\n"
-            text += '\n'
-        
-        # AI предложения (названия для поиска)
-        if ai_suggestions:
-            header = '💡 <b>Ищите в Telegram:</b>' if lang == 'ru' else '💡 <b>Search in Telegram:</b>'
-            text += f'{header}\n'
-            for chat in ai_suggestions[:5]:
+            for chat in web_chats[:5]:
                 text += f"• {chat['username']}\n"
             text += '\n'
         
@@ -243,7 +240,7 @@ async def process_ai_chats(message: Message, user: User, state: FSMContext):
             text += '💡 <b>Как добавить чат:</b>\n'
             text += '1. Нажмите на ссылку чата\n'
             text += '2. Убедитесь что чат активный\n'
-            text += '3. Скопируйте ссылку\n'
+            text += '3. Скопируйте username или ссылку\n'
             text += '4. Добавьте через "➕ Добавить чат"'
         else:
             text += '━━━━━━━━━━━━━━━━━━━━━\n'

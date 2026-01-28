@@ -1,10 +1,26 @@
 """Дополнительные утилиты для работы с датами и подписками"""
 from datetime import datetime, timedelta
 from database.models import SubscriptionPlan
+from config import settings
 
 
-def get_subscription_limits(plan: SubscriptionPlan) -> dict:
-    """Получить лимиты для тарифного плана"""
+def is_admin(telegram_id: int) -> bool:
+    """Проверить, является ли пользователь админом"""
+    return telegram_id in settings.admin_ids_list
+
+
+def get_subscription_limits(plan: SubscriptionPlan, telegram_id: int = None) -> dict:
+    """Получить лимиты для тарифного плана. Админы получают безлимит."""
+    
+    # Админы получают максимальные лимиты
+    if telegram_id and is_admin(telegram_id):
+        return {
+            'max_chats': -1,  # Безлимит
+            'max_keywords': -1,
+            'ai_enabled': True,
+            'support_priority': 'admin'
+        }
+    
     limits = {
         SubscriptionPlan.FREE: {
             'max_chats': 0,
