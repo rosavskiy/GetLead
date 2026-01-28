@@ -335,19 +335,26 @@ class UserbotWorker:
             # Получаем все проекты, которые мониторят этот чат
             async with async_session_maker() as session:
                 from sqlalchemy import select
+                from sqlalchemy.orm import selectinload
                 from database.models import chat_project_association
                 
-                # Находим чат
+                # Находим чат с проектами
                 result = await session.execute(
-                    select(Chat).where(Chat.telegram_id == chat_id)
+                    select(Chat)
+                    .where(Chat.telegram_id == chat_id)
+                    .options(selectinload(Chat.projects).selectinload(Project.user))
                 )
                 chat = result.scalar_one_or_none()
                 
                 if not chat:
+                    logger.warning(f"⚠️ Чат {chat_id} не найден в БД")
                     return
+                
+                logger.info(f"🔍 Чат {chat.telegram_link} связан с {len(chat.projects)} проектами")
                 
                 # Получаем все проекты этого чата
                 for project in chat.projects:
+                    logger.info(f"🎯 Проверяем проект '{project.name}' (user_id={project.user_id})")
                     await self.check_project_match(event, text, project, chat)
         
         except Exception as e:
@@ -391,6 +398,8 @@ class UserbotWorker:
                     exclude_keywords=exclude_keywords,
                     filters=[]  # TODO: Добавить поддержку фильтров
                 )
+                
+                logger.info(f"🔎 Matching result: matched={result['matched']}, keywords={[getattr(k, 'text', k) for k in result.get('keywords', [])]}")
                 
                 if result['matched']:
                     message_link = self.get_message_link(event)
