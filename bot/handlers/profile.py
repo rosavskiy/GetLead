@@ -79,14 +79,17 @@ async def get_profile_text(user: User) -> str:
             days_left = (user.subscription_end_date - datetime.utcnow()).days
             text += f"\n{get_text('profile_days_left', lang)} {days_left}"
     
+    # Форматируем лимиты
+    max_chats = limits['max_chats'] if limits['max_chats'] > 0 else '∞'
+    
     text += f"""
 
 ━━━━━━━━━━━━━━━━━━━━
 
 {get_text('profile_stats_title', lang)}
 
-📁 {get_text('profile_projects', lang)} {projects_count}/{limits['projects']}
-💬 {get_text('profile_chats', lang)} {chats_count}/{limits['chats']}
+📁 {get_text('profile_projects', lang)} {projects_count}
+💬 {get_text('profile_chats', lang)} {chats_count}/{max_chats}
 📊 {get_text('profile_leads_total', lang)} {total_leads}
 📈 {get_text('profile_leads_today', lang)} {today_leads}
 📉 {get_text('profile_leads_week', lang)} {week_leads}"""
