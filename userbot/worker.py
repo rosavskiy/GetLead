@@ -227,8 +227,12 @@ class UserbotWorker:
             )
             chats = result.scalars().all()
             
+            logger.info(f"📋 Найдено {len(chats)} чатов для {self.session_name}")
+            
             for chat in chats:
                 try:
+                    logger.info(f"  📍 Чат: {chat.telegram_link}, telegram_id={chat.telegram_id}, is_joined={chat.is_joined}")
+                    
                     # Пытаемся вступить в чат (если еще не вступили)
                     if not chat.is_joined:
                         await self.join_chat(chat)
@@ -242,6 +246,8 @@ class UserbotWorker:
                     
                 except Exception as e:
                     logger.error(f"❌ Ошибка загрузки чата {chat.telegram_link}: {e}")
+        
+        logger.info(f"📡 Активный мониторинг: {len(self.monitored_chats)} чатов, IDs: {self.monitored_chats}")
     
     async def join_chat(self, chat: Chat):
         """Вступление в чат"""
@@ -285,22 +291,21 @@ class UserbotWorker:
         """Обработка нового сообщения"""
         try:
             chat_id = event.chat_id
-            logger.info(f"🔔 Событие NewMessage: chat_id={chat_id}, monitored={chat_id in self.monitored_chats}")
+            is_monitored = chat_id in self.monitored_chats
             
             # Проверяем, что сообщение из мониторируемого чата
-            if chat_id not in self.monitored_chats:
-                logger.debug(f"❌ Чат {chat_id} не мониторится. Список: {self.monitored_chats}")
+            if not is_monitored:
+                # Не спамим логами о немониторируемых чатах
                 return
             
             # Получаем текст сообщения
             text = event.message.message
             if not text:
-                logger.debug(f"⚠️ Сообщение без текста в чате {chat_id}")
                 return
             
             # Игнорируем свои сообщения
             is_outgoing = event.message.out
-            logger.info(f"📨 Сообщение в чате {chat_id}: '{text[:50]}...', out={is_outgoing}")
+            logger.info(f"📨 Сообщение в мониторируемом чате {chat_id}: '{text[:80]}...', out={is_outgoing}")
             
             if is_outgoing:
                 logger.info(f"⏭️ Пропускаем свое сообщение")
