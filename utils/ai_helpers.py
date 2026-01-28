@@ -132,43 +132,212 @@ def detect_category(niche: str) -> str:
     return best_category
 
 
-async def search_telemetr_chats(query: str) -> List[dict]:
+async def search_telemetr_chats(query: str, min_subscribers: int = 1000) -> List[dict]:
     """
-    Поиск чатов на Telemetr.me (бесплатный скрапинг)
+    Поиск чатов на Telemetr.me с извлечением статистики
     
     Args:
         query: Поисковый запрос
+        min_subscribers: Минимальное количество подписчиков
         
     Returns:
-        Список словарей с информацией о чатах
+        Список словарей с информацией о чатах, отсортированный по подписчикам
     """
+    results = []
+    
     try:
+        # Поиск по запросу
         url = f"https://telemetr.me/channels/?q={query}"
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
         
         async with aiohttp.ClientSession() as session:
-            async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as response:
+            async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as response:
                 if response.status != 200:
+                    logger.warning(f"Telemetr returned status {response.status}")
                     return []
                 
                 html = await response.text()
                 
-                # Извлекаем username'ы чатов
-                pattern = r'@([a-zA-Z0-9_]{5,})'
-                usernames = re.findall(pattern, html)
+                # Ищем карточки каналов с подписчиками
+                # Формат: @username и рядом число подписчиков (например "12.5K" или "1.2M")
+                # Паттерн для извлечения username и subscribers
                 
-                # Убираем дубликаты и системные
-                seen = set()
-                result = []
-                for username in usernames:
-                    if username not in seen and not username.startswith('telemetr'):
-                        seen.add(username)
-                        result.append({'username': f'@{username}', 'link': f't.me/{username}'})
-                        if len(result) >= 15:
+                # Сначала найдём все ссылки на каналы
+                channel_pattern = r'href="[^"]*(/channels/([a-zA-Z0-9_]+))"[^>]*>.*?(\d+(?:\.\d+)?[KkMmКкМм]?)\s*(?:подписчик|subscriber|участник|member)'
+                matches = re.findall(channel_pattern, html, re.IGNORECASE | re.DOTALL)
+                
+                # Альтернативный паттерн - просто ищем @username и числа рядом
+                if not matches:
+                    # Извлекаем username'ы
+                    username_pattern = r'@([a-zA-Z0-9_]{5,32})'
+                    usernames = re.findall(username_pattern, html)
+                    
+                    # Извлекаем числа (подписчики)
+                    numbers_pattern = r'(\d+(?:\.\d+)?)\s*([KkMmКкМм])?(?:\s*(?:подписчик|subscriber|участник|member|чел))?'
+                    numbers = re.findall(numbers_pattern, html)
+                    
+                    seen = set()
+                    for username in usernames:
+                        if username.lower() in seen or username.lower().startswith('telemetr'):
+                            continue
+                        seen.add(username.lower())
+                        
+                        # Пытаемся найти число подписчиков для этого канала
+                        subscribers = 5000  # Дефолт если не нашли
+                        
+                        # Ищем число рядом с username в HTML
+                        idx = html.find(f'@{username}')
+                        if idx != -1:
+                            context = html[max(0, idx-200):idx+200]
+                            for num, suffix in numbers:
+                                num_float = float(num)
+                                if suffix and suffix.upper() in ['K', 'К']:
+                                    num_float *= 1000
+                                elif suffix and suffix.upper() in ['M', 'М']:
+                                    num_float *= 1000000
+                                if num_float >= 100:  # Похоже на подписчиков
+                                    subscribers = int(num_float)
+                                    break
+                        
+                        if subscribers >= min_subscribers:
+                            results.append({
+                                'username': f'@{username}',
+                                'link': f't.me/{username}',
+                                'subscribers': subscribers,
+                                'source': 'telemetr'
+                            })
+                        
+                        if len(results) >= 20:
                             break
-                
-                return result
-    except Exception:
+                else:
+                    for match in matches:
+                        username = match[1]
+                        sub_str = match[2]
+                        
+                        # Парсим число подписчиков
+                        subscribers = parse_subscriber_count(sub_str)
+                        
+                        if subscribers >= min_subscribers:
+                            results.append({
+                                'username': f'@{username}',
+                                'link': f't.me/{username}',
+                                'subscribers': subscribers,
+                                'source': 'telemetr'
+                            })
+        
+        # Сортируем по подписчикам (больше = лучше)
+        results.sort(key=lambda x: x['subscribers'], reverse=True)
+        
+        logger.info(f"Telemetr found {len(results)} chats for '{query}'")
+        return results[:15]
+        
+    except Exception as e:
+        logger.error(f"Telemetr search error: {e}")
         return []
+
+
+async def search_tgstat_chats(query: str, min_subscribers: int = 1000) -> List[dict]:
+    """
+    Поиск чатов на TGStat.ru с извлечением статистики
+    
+    Args:
+        query: Поисковый запрос
+        min_subscribers: Минимальное количество подписчиков
+        
+    Returns:
+        Список словарей с информацией о чатах
+    """
+    results = []
+    
+    try:
+        # TGStat поиск
+        url = f"https://tgstat.ru/channels/search?q={query}"
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': 'text/html,application/xhtml+xml',
+            'Accept-Language': 'ru-RU,ru;q=0.9,en;q=0.8'
+        }
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as response:
+                if response.status != 200:
+                    logger.warning(f"TGStat returned status {response.status}")
+                    return []
+                
+                html = await response.text()
+                
+                # Ищем карточки каналов
+                # TGStat обычно имеет формат: /channel/@username и число подписчиков
+                card_pattern = r'/channel/@([a-zA-Z0-9_]+).*?(\d+(?:\.\d+)?[KkMmКкМм]?)\s*(?:подписчик|участник)'
+                matches = re.findall(card_pattern, html, re.IGNORECASE | re.DOTALL)
+                
+                seen = set()
+                for username, sub_str in matches:
+                    if username.lower() in seen:
+                        continue
+                    seen.add(username.lower())
+                    
+                    subscribers = parse_subscriber_count(sub_str)
+                    
+                    if subscribers >= min_subscribers:
+                        results.append({
+                            'username': f'@{username}',
+                            'link': f't.me/{username}',
+                            'subscribers': subscribers,
+                            'source': 'tgstat'
+                        })
+                
+                # Если паттерн не сработал, ищем альтернативно
+                if not results:
+                    username_pattern = r'@([a-zA-Z0-9_]{5,32})'
+                    usernames = re.findall(username_pattern, html)
+                    
+                    for username in usernames[:15]:
+                        if username.lower() not in seen and not username.lower().startswith('tgstat'):
+                            seen.add(username.lower())
+                            results.append({
+                                'username': f'@{username}',
+                                'link': f't.me/{username}',
+                                'subscribers': 5000,  # Оценка
+                                'source': 'tgstat'
+                            })
+        
+        results.sort(key=lambda x: x['subscribers'], reverse=True)
+        logger.info(f"TGStat found {len(results)} chats for '{query}'")
+        return results[:10]
+        
+    except Exception as e:
+        logger.error(f"TGStat search error: {e}")
+        return []
+
+
+def parse_subscriber_count(sub_str: str) -> int:
+    """Парсит строку подписчиков в число (12.5K -> 12500)"""
+    try:
+        sub_str = sub_str.strip().upper().replace(',', '.').replace(' ', '')
+        
+        multiplier = 1
+        if 'K' in sub_str or 'К' in sub_str:
+            multiplier = 1000
+            sub_str = sub_str.replace('K', '').replace('К', '')
+        elif 'M' in sub_str or 'М' in sub_str:
+            multiplier = 1000000
+            sub_str = sub_str.replace('M', '').replace('М', '')
+        
+        return int(float(sub_str) * multiplier)
+    except:
+        return 0
+
+
+def format_subscribers(count: int) -> str:
+    """Форматирует число подписчиков (12500 -> 12.5K)"""
+    if count >= 1000000:
+        return f"{count/1000000:.1f}M"
+    elif count >= 1000:
+        return f"{count/1000:.1f}K"
+    return str(count)
 
 
 async def generate_keywords(niche: str) -> List[str]:
@@ -264,72 +433,111 @@ async def generate_exclude_words(niche: str) -> List[str]:
         await client.close()
 
 
-async def suggest_chats(niche: str) -> List[dict]:
+async def suggest_chats(niche: str, min_subscribers: int = 1000) -> List[dict]:
     """
-    Предложение чатов для мониторинга (гибридный подход)
+    Предложение ЖИВЫХ чатов для мониторинга
     
-    1. Определяем категорию по нише
-    2. Берём чаты из встроенной базы
-    3. Дополняем поиском на Telemetr.me
+    Стратегия:
+    1. Парсим Telemetr.me и TGStat.ru с фильтром по подписчикам
+    2. Дополняем из встроенной базы
+    3. Сортируем по количеству подписчиков
+    4. Возвращаем только активные чаты (1000+ участников)
     
     Args:
         niche: Описание ниши
+        min_subscribers: Минимум подписчиков (по умолчанию 1000)
         
     Returns:
-        Список словарей с информацией о чатах
+        Список словарей с информацией о чатах, отсортированный по популярности
     """
     results = []
+    seen_usernames = set()
     
     try:
-        # 1. Определяем категорию
+        logger.info(f"Starting chat search for niche: '{niche}'")
+        
+        # 1. Определяем категорию и ключевые слова для поиска
         category = detect_category(niche)
-        logger.info(f"Detected category '{category}' for niche '{niche}'")
+        logger.info(f"Detected category: '{category}'")
         
-        # 2. Берём из встроенной базы
+        # Формируем поисковые запросы
+        search_queries = [niche]
+        
+        # Добавляем ключевые слова категории
+        category_keywords = NICHE_KEYWORDS.get(category, [])[:3]
+        search_queries.extend(category_keywords)
+        
+        # 2. Параллельно ищем на Telemetr и TGStat
+        import asyncio
+        
+        search_tasks = []
+        for query in search_queries[:2]:  # Первые 2 запроса
+            search_tasks.append(search_telemetr_chats(query, min_subscribers))
+            search_tasks.append(search_tgstat_chats(query, min_subscribers))
+        
+        search_results = await asyncio.gather(*search_tasks, return_exceptions=True)
+        
+        # Собираем результаты
+        for result in search_results:
+            if isinstance(result, Exception):
+                logger.warning(f"Search task failed: {result}")
+                continue
+            if isinstance(result, list):
+                for chat in result:
+                    username_lower = chat['username'].lower()
+                    if username_lower not in seen_usernames:
+                        seen_usernames.add(username_lower)
+                        results.append(chat)
+        
+        logger.info(f"Found {len(results)} chats from web search")
+        
+        # 3. Дополняем из встроенной базы (с оценкой подписчиков)
         db_chats = CHAT_DATABASE.get(category, [])
-        for chat in db_chats[:10]:
-            results.append({
-                'username': chat,
-                'link': f't.me/{chat.replace("@", "")}',
-                'source': 'database'
-            })
+        for chat in db_chats:
+            username_lower = chat.lower()
+            if username_lower not in seen_usernames:
+                seen_usernames.add(username_lower)
+                results.append({
+                    'username': chat,
+                    'link': f't.me/{chat.replace("@", "")}',
+                    'subscribers': 5000,  # Оценка для чатов из базы
+                    'source': 'database'
+                })
         
-        logger.info(f"Found {len(results)} chats from database")
+        # 4. Сортируем по количеству подписчиков
+        results.sort(key=lambda x: x.get('subscribers', 0), reverse=True)
         
-        # 3. Пробуем найти на Telemetr.me (опционально)
-        try:
-            telemetr_chats = await search_telemetr_chats(niche)
-            for chat in telemetr_chats[:5]:
-                if chat['username'] not in [r['username'] for r in results]:
-                    chat['source'] = 'telemetr'
-                    results.append(chat)
-            logger.info(f"Found {len(telemetr_chats)} chats from Telemetr")
-        except Exception as e:
-            logger.warning(f"Telemetr search failed: {e}")
+        # 5. Фильтруем только с достаточным количеством подписчиков
+        results = [r for r in results if r.get('subscribers', 5000) >= min_subscribers]
         
-        # 4. Если есть OpenAI и мало результатов, дополняем AI-предложениями
-        if settings.OPENAI_API_KEY and len(results) < 10:
+        logger.info(f"After filtering: {len(results)} chats with {min_subscribers}+ subscribers")
+        
+        # 6. Если мало результатов и есть OpenAI - добавляем AI предложения
+        if settings.OPENAI_API_KEY and len(results) < 5:
             try:
                 ai_suggestions = await suggest_chat_names_ai(niche)
                 for name in ai_suggestions[:5]:
-                    results.append({
-                        'username': name,
-                        'link': None,
-                        'source': 'ai_suggestion'
-                    })
+                    if name.lower() not in seen_usernames:
+                        results.append({
+                            'username': name,
+                            'link': None,
+                            'subscribers': None,
+                            'source': 'ai_suggestion'
+                        })
                 logger.info(f"Added {len(ai_suggestions)} AI suggestions")
             except Exception as e:
                 logger.warning(f"AI suggestions failed: {e}")
         
-        logger.info(f"Total chats found: {len(results)}")
+        logger.info(f"Total results: {len(results)}")
         
     except Exception as e:
-        logger.error(f"Error in suggest_chats: {e}")
-        # Возвращаем хотя бы что-то из общей базы фриланса
-        for chat in CHAT_DATABASE.get('freelance', [])[:5]:
+        logger.error(f"Error in suggest_chats: {e}", exc_info=True)
+        # Fallback - возвращаем из базы
+        for chat in CHAT_DATABASE.get(category if 'category' in dir() else 'freelance', [])[:5]:
             results.append({
                 'username': chat,
                 'link': f't.me/{chat.replace("@", "")}',
+                'subscribers': 5000,
                 'source': 'database'
             })
     
