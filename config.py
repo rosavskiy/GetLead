@@ -64,6 +64,10 @@ class Settings(BaseSettings):
             return []
         return [int(admin_id.strip()) for admin_id in self.ADMIN_IDS.split(',')]
     
+    def get_admin_ids(self) -> List[int]:
+        """Получить список ID администраторов"""
+        return self.admin_ids_list
+    
     @property
     def userbots_config(self) -> List[dict]:
         """Конфигурация юзерботов"""

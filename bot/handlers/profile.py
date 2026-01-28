@@ -16,9 +16,8 @@ from utils.subscription_helpers import get_subscription_limits
 router = Router()
 
 
-@router.callback_query(F.data == 'menu:profile')
-async def show_profile(callback: CallbackQuery, user: User):
-    """Показать личный кабинет пользователя"""
+async def get_profile_text(user: User) -> str:
+    """Получить текст профиля пользователя"""
     lang = user.language
     
     async with async_session_maker() as session:
@@ -78,43 +77,65 @@ async def show_profile(callback: CallbackQuery, user: User):
     if user.subscription_plan != SubscriptionPlan.FREE:
         if user.subscription_end_date:
             days_left = (user.subscription_end_date - datetime.utcnow()).days
-            text += f"\n{get_text('profile_expires', lang)} {get_text('days_left', lang).format(days_left)}"
-            text += f"\n{get_text('profile_expires_date', lang)} {user.subscription_end_date.strftime('%d.%m.%Y')}"
+            text += f"\n{get_text('profile_days_left', lang)} {days_left}"
     
     text += f"""
 
 ━━━━━━━━━━━━━━━━━━━━
 
-{get_text('profile_stats', lang)}
+{get_text('profile_stats_title', lang)}
 
-{get_text('profile_projects', lang)} {projects_count}
-{get_text('profile_chats', lang)} {chats_count}/{limits['max_chats'] if limits['max_chats'] > 0 else '∞'}
+📁 {get_text('profile_projects', lang)} {projects_count}/{limits['projects']}
+💬 {get_text('profile_chats', lang)} {chats_count}/{limits['chats']}
+📊 {get_text('profile_leads_total', lang)} {total_leads}
+📈 {get_text('profile_leads_today', lang)} {today_leads}
+📉 {get_text('profile_leads_week', lang)} {week_leads}"""
+    
+    return text
 
-{get_text('profile_leads', lang)}
-   • {get_text('profile_today', lang)}: <b>{today_leads}</b>
-   • {get_text('profile_week', lang)}: <b>{week_leads}</b>
-   • {get_text('profile_total', lang)}: <b>{total_leads}</b>
-"""
+
+async def show_profile_menu_msg(message: Message, user: User):
+    """Показать профиль как сообщение (для команды)"""
+    text = await get_profile_text(user)
+    await message.answer(text, reply_markup=profile_menu_kb(user.language), parse_mode='HTML')
+
+
+async def show_stats_msg(message: Message, user: User):
+    """Показать статистику как сообщение (для команды)"""
+    from bot.handlers.profile import show_detailed_stats_text
+    text = await show_detailed_stats_text(user)
+    await message.answer(text, reply_markup=stats_period_kb(user.language), parse_mode='HTML')
+
+
+@router.callback_query(F.data == 'menu:profile')
+async def show_profile(callback: CallbackQuery, user: User):
+    """Показать личный кабинет пользователя"""
+    text = await get_profile_text(user)
     
     await callback.message.edit_text(
         text,
-        reply_markup=profile_menu_kb(lang),
+        reply_markup=profile_menu_kb(user.language),
         parse_mode='HTML'
     )
     await callback.answer()
 
 
+async def show_detailed_stats_text(user: User) -> str:
+    """Получить текст детальной статистики"""
+    lang = user.language
+    return f"""{get_text('stats_title', lang)}
+
+{get_text('stats_choose_period', lang)}"""
+
+
 @router.callback_query(F.data == 'profile:stats')
 async def show_detailed_stats(callback: CallbackQuery, user: User):
     """Показать детальную статистику"""
-    lang = user.language
-    text = f"""{get_text('stats_title', lang)}
-
-{get_text('stats_choose_period', lang)}"""
+    text = await show_detailed_stats_text(user)
     
     await callback.message.edit_text(
         text,
-        reply_markup=stats_period_kb(lang),
+        reply_markup=stats_period_kb(user.language),
         parse_mode='HTML'
     )
     await callback.answer()

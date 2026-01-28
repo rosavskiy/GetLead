@@ -13,9 +13,8 @@ from bot.keyboards import projects_menu_kb, cancel_kb, main_menu_kb
 router = Router()
 
 
-@router.callback_query(F.data == 'menu:projects')
-async def show_projects_menu(callback: CallbackQuery, user: User):
-    """Показать меню проектов"""
+async def get_projects_text(user: User) -> tuple:
+    """Получить текст и клавиатуру для меню проектов"""
     async with async_session_maker() as session:
         projects = await ProjectCRUD.get_all(session, user.id)
     
@@ -28,6 +27,20 @@ async def show_projects_menu(callback: CallbackQuery, user: User):
         for project in projects:
             status = '✅ Активен' if project.is_active else '⚪ Неактивен'
             text += f'\n• {project.name} — {status}'
+    
+    return text, projects
+
+
+async def show_projects_menu_msg(message: Message, user: User):
+    """Показать меню проектов как сообщение (для команды)"""
+    text, projects = await get_projects_text(user)
+    await message.answer(text, reply_markup=projects_menu_kb(projects, user.language), parse_mode='HTML')
+
+
+@router.callback_query(F.data == 'menu:projects')
+async def show_projects_menu(callback: CallbackQuery, user: User):
+    """Показать меню проектов"""
+    text, projects = await get_projects_text(user)
     
     await callback.message.edit_text(
         text,

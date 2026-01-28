@@ -73,6 +73,53 @@ async def show_main_menu(callback: CallbackQuery, user: User, state: FSMContext)
     await callback.answer()
 
 
+@router.message(Command('menu'))
+async def cmd_menu(message: Message, user: User, state: FSMContext):
+    """Обработчик команды /menu"""
+    await state.clear()
+    text = get_text('main_menu', user.language)
+    await message.answer(text, reply_markup=main_menu_kb(user.language), parse_mode='HTML')
+
+
+@router.message(Command('profile'))
+async def cmd_profile(message: Message, user: User, state: FSMContext):
+    """Обработчик команды /profile"""
+    await state.clear()
+    # Импортируем здесь чтобы избежать циклических импортов
+    from bot.handlers.profile import show_profile_menu_msg
+    await show_profile_menu_msg(message, user)
+
+
+@router.message(Command('projects'))
+async def cmd_projects(message: Message, user: User, state: FSMContext):
+    """Обработчик команды /projects"""
+    await state.clear()
+    from bot.handlers.projects import show_projects_menu_msg
+    await show_projects_menu_msg(message, user)
+
+
+@router.message(Command('stats'))
+async def cmd_stats(message: Message, user: User, state: FSMContext):
+    """Обработчик команды /stats"""
+    await state.clear()
+    from bot.handlers.profile import show_stats_msg
+    await show_stats_msg(message, user)
+
+
+@router.message(Command('help'))
+async def cmd_help(message: Message, user: User):
+    """Обработчик команды /help"""
+    text = get_text('help_title', user.language) + get_text('help_text', user.language)
+    await message.answer(text, reply_markup=back_to_main_kb(user.language), parse_mode='HTML')
+
+
+@router.message(Command('language'))
+async def cmd_language(message: Message, user: User):
+    """Обработчик команды /language"""
+    text = get_text('choose_language', user.language)
+    await message.answer(text, reply_markup=language_selection_kb(), parse_mode='HTML')
+
+
 @router.callback_query(F.data == 'menu:help')
 async def show_help(callback: CallbackQuery, user: User):
     """Показать помощь"""
