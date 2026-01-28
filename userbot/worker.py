@@ -177,51 +177,11 @@ class UserbotWorker:
                 except Exception:
                     continue
             
-            # 2. Дополнительный поиск по названию
-            try:
-                contacts_result = await self.client(functions.contacts.SearchRequest(
-                    q=query,
-                    limit=20
-                ))
-                
-                for chat in contacts_result.chats:
-                    try:
-                        if chat.id in seen_chat_ids:
-                            continue
-                        seen_chat_ids.add(chat.id)
-                        
-                        if not hasattr(chat, 'username') or not chat.username:
-                            continue
-                        
-                        # Пропускаем каналы - только чаты!
-                        if isinstance(chat, Channel):
-                            if chat.broadcast and not chat.megagroup:
-                                continue
-                        
-                        subscribers = getattr(chat, 'participants_count', None)
-                        
-                        chat_type = 'supergroup'
-                        if isinstance(chat, Channel):
-                            if chat.megagroup:
-                                chat_type = 'supergroup'
-                            else:
-                                chat_type = 'group'
-                        
-                        results.append({
-                            'username': f'@{chat.username}',
-                            'title': getattr(chat, 'title', chat.username),
-                            'link': f't.me/{chat.username}',
-                            'subscribers': subscribers,
-                            'type': chat_type,
-                            'relevance': 5,
-                            'verified': True
-                        })
-                    except Exception:
-                        continue
-            except Exception as e:
-                logger.warning(f"Contacts search failed: {e}")
+            # ВАЖНО: contacts.SearchRequest убран!
+            # Он возвращает чаты из диалогов юзербота, а не публичные чаты по запросу.
+            # Используем только SearchGlobal который ищет по содержимому сообщений.
             
-            # Сортируем
+            # Сортируем по релевантности (кол-во найденных сообщений) и подписчикам
             results.sort(key=lambda x: (-x.get('relevance', 0), -(x.get('subscribers') or 0)))
             
         except FloodWaitError as e:
