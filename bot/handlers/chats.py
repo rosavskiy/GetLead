@@ -259,11 +259,11 @@ async def process_ai_chats(message: Message, user: User, state: FSMContext):
         
         # Показываем результат
         if lang == 'ru':
-            text = f'🎯 <b>Чаты по запросу "{niche}"</b>\n\n'
+            text = f'💬 <b>Чаты по запросу "{niche}"</b>\n\n'
         else:
-            text = f'🎯 <b>Chats for "{niche}"</b>\n\n'
+            text = f'💬 <b>Chats for "{niche}"</b>\n\n'
         
-        # Все чаты верифицированы через Telegram API
+        # Все результаты - это чаты (каналы отфильтрованы)
         for chat in chat_suggestions[:15]:
             title = chat.get('title', chat['username'])
             subs = chat.get('subscribers')
@@ -272,13 +272,8 @@ async def process_ai_chats(message: Message, user: User, state: FSMContext):
             else:
                 subs_str = ""
             
-            # Тип чата
-            chat_type = chat.get('type', '')
-            type_emoji = ''
-            if chat_type == 'channel':
-                type_emoji = '📢 '
-            elif chat_type in ('supergroup', 'group'):
-                type_emoji = '👥 '
+            # Все результаты - чаты
+            type_emoji = '👥 '
             
             text += f"• {type_emoji}<a href=\"https://{chat['link']}\">{title}</a>{subs_str}\n"
         

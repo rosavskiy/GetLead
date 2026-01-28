@@ -147,14 +147,19 @@ class UserbotWorker:
                     if not hasattr(chat, 'username') or not chat.username:
                         continue
                     
+                    # ВАЖНО: Пропускаем каналы (broadcast) - мы не можем мониторить их комментарии
+                    # Оставляем только чаты (megagroup) где есть сообщения пользователей
+                    if isinstance(chat, Channel):
+                        if chat.broadcast and not chat.megagroup:
+                            # Это канал, не чат - пропускаем
+                            continue
+                    
                     subscribers = getattr(chat, 'participants_count', None)
                     
-                    chat_type = 'unknown'
+                    chat_type = 'supergroup'  # Теперь это всегда чат
                     if isinstance(chat, Channel):
                         if chat.megagroup:
                             chat_type = 'supergroup'
-                        elif chat.broadcast:
-                            chat_type = 'channel'
                         else:
                             chat_type = 'group'
                     
@@ -188,14 +193,17 @@ class UserbotWorker:
                         if not hasattr(chat, 'username') or not chat.username:
                             continue
                         
+                        # Пропускаем каналы - только чаты!
+                        if isinstance(chat, Channel):
+                            if chat.broadcast and not chat.megagroup:
+                                continue
+                        
                         subscribers = getattr(chat, 'participants_count', None)
                         
-                        chat_type = 'unknown'
+                        chat_type = 'supergroup'
                         if isinstance(chat, Channel):
                             if chat.megagroup:
                                 chat_type = 'supergroup'
-                            elif chat.broadcast:
-                                chat_type = 'channel'
                             else:
                                 chat_type = 'group'
                         
