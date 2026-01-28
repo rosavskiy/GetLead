@@ -93,9 +93,21 @@ git pull origin main || {
     exit 1
 }
 
-# 4. Проверка изменений в requirements.txt
+# 4. Проверка изменений в requirements.txt или новых Python файлов
+NEED_DEPS_UPDATE=false
+
 if git diff HEAD@{1} HEAD --name-only | grep -q "requirements.txt"; then
+    NEED_DEPS_UPDATE=true
     log "Обнаружены изменения в requirements.txt"
+fi
+
+# Также обновляем зависимости если добавлены новые .py файлы в utils/
+if git diff HEAD@{1} HEAD --name-only | grep -q "utils/.*\.py"; then
+    NEED_DEPS_UPDATE=true
+    log "Обнаружены новые утилиты, проверяем зависимости..."
+fi
+
+if [ "$NEED_DEPS_UPDATE" = true ]; then
     log "Обновление зависимостей Python..."
     
     source venv/bin/activate
@@ -109,11 +121,32 @@ else
     log "Зависимости не изменились, пропускаем обновление"
 fi
 
-# 5. Проверка изменений в моделях БД
+# 5. Проверка изменений в моделях БД и применение миграций
 if git diff HEAD@{1} HEAD --name-only | grep -q "database/models.py"; then
     warning "⚠️  Обнаружены изменения в моделях БД!"
-    warning "⚠️  Возможно, требуется миграция базы данных"
-    warning "⚠️  Проверьте вручную: alembic upgrade head"
+    log "Применение миграций..."
+    
+    source venv/bin/activate
+    
+    # Проверяем наличие alembic.ini
+    if [ -f "alembic.ini" ]; then
+        log "Использование Alembic для миграции..."
+        alembic upgrade head || {
+            error "Ошибка миграции Alembic"
+            warning "Попытка создать таблицы через SQLAlchemy..."
+            python -c "import asyncio; from database.database import init_db; asyncio.run(init_db())" || {
+                error "Ошибка создания таблиц"
+            }
+        }
+    else
+        log "Alembic не настроен. Создание таблиц через SQLAlchemy..."
+        python -c "import asyncio; from database.database import init_db; asyncio.run(init_db())" || {
+            error "Ошибка создания таблиц БД"
+        }
+    fi
+    
+    deactivate
+    log "✅ Миграция БД завершена"
 fi
 
 # 6. Перезапуск сервисов
