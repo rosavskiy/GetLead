@@ -12,6 +12,7 @@ class KeywordStates(StatesGroup):
     """Состояния для работы с ключевыми словами"""
     waiting_for_keywords = State()
     waiting_for_ai_niche = State()
+    selecting_ai_keywords = State()  # Выбор из AI предложений
 
 
 class ExcludeStates(StatesGroup):

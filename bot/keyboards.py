@@ -291,3 +291,34 @@ def filters_menu_kb(has_filters: bool = False, lang: str = 'ru') -> InlineKeyboa
     
     builder.adjust(1)
     return builder.as_markup()
+
+
+def ai_keywords_selection_kb(keywords: List[str], lang: str = 'ru') -> InlineKeyboardMarkup:
+    """Клавиатура для выбора AI ключевых слов"""
+    builder = InlineKeyboardBuilder()
+    
+    # Кнопки для каждого ключевого слова (укороченные)
+    for i, kw in enumerate(keywords):
+        # Обрезаем длинные ключевые слова
+        display_text = kw[:25] + '...' if len(kw) > 25 else kw
+        builder.button(text=f'➕ {display_text}', callback_data=f'ai_kw:add:{i}')
+    
+    # Кнопки действий
+    add_all = '✅ Добавить все' if lang == 'ru' else '✅ Add all'
+    done = '✔️ Готово' if lang == 'ru' else '✔️ Done'
+    
+    builder.button(text=add_all, callback_data='ai_kw:add_all')
+    builder.button(text=done, callback_data='ai_kw:done')
+    
+    # Размещаем: ключевые слова по 2 в ряд, кнопки действий по 1
+    rows = []
+    for i in range(0, len(keywords), 2):
+        if i + 1 < len(keywords):
+            rows.append(2)
+        else:
+            rows.append(1)
+    rows.append(1)  # Добавить все
+    rows.append(1)  # Готово
+    
+    builder.adjust(*rows)
+    return builder.as_markup()

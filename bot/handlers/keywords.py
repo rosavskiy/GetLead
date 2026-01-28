@@ -9,7 +9,7 @@ from database.crud import ProjectCRUD, KeywordCRUD
 from database.models import User, KeywordType
 from bot.states import KeywordStates, ExcludeStates
 from bot.texts import get_text
-from bot.keyboards import keywords_menu_kb, exclude_menu_kb, cancel_kb, main_menu_kb
+from bot.keyboards import keywords_menu_kb, exclude_menu_kb, cancel_kb, main_menu_kb, ai_keywords_selection_kb
 
 logger = logging.getLogger(__name__)
 
@@ -178,14 +178,36 @@ async def start_ai_keywords(callback: CallbackQuery, user: User, state: FSMConte
     """Начать AI подбор ключевых слов"""
     await state.set_state(KeywordStates.waiting_for_ai_niche)
     
-    text = '🤖 Введите вашу нишу для AI-подбора ключевых слов:\n\nНапример: "Дизайн сайтов", "SMM", "Копирайтинг"'
-    await callback.message.answer(text, reply_markup=cancel_kb(user.language))
+    if user.language == 'ru':
+        text = '''🤖 <b>AI-подбор ключевых слов</b>
+
+Опишите своими словами <b>кого вы ищете</b> — вашего идеального клиента.
+
+<b>Примеры описаний:</b>
+• "Ищу людей, которым нужно оформить визы в любые страны"
+• "Мне нужны клиенты на разработку сайтов и лендингов"
+• "Ищу тех, кто хочет заказать SMM продвижение"
+
+💡 Чем подробнее описание — тем точнее будут ключевые слова!'''
+    else:
+        text = '''🤖 <b>AI Keyword Suggestion</b>
+
+Describe in your own words <b>who you are looking for</b> — your ideal client.
+
+<b>Example descriptions:</b>
+• "I'm looking for people who need visa services"
+• "I need clients for website development"
+• "Looking for those who want SMM promotion"
+
+💡 The more detailed description — the more accurate keywords!'''
+    
+    await callback.message.answer(text, parse_mode='HTML', reply_markup=cancel_kb(user.language))
     await callback.answer()
 
 
 @router.message(KeywordStates.waiting_for_ai_niche)
 async def process_ai_keywords(message: Message, user: User, state: FSMContext):
-    """Обработка AI подбора ключевых слов"""
+    """Обработка AI подбора ключевых слов — показываем предложения"""
     if message.text == '❌ Отмена' or message.text == '❌ Cancel':
         await state.clear()
         await message.answer(
@@ -194,68 +216,159 @@ async def process_ai_keywords(message: Message, user: User, state: FSMContext):
         )
         return
     
-    niche = message.text.strip()
+    description = message.text.strip()
     lang = user.language
     
     # Показываем сообщение о генерации
-    gen_text = '🤖 Генерирую ключевые слова...' if lang == 'ru' else '🤖 Generating keywords...'
+    gen_text = '🤖 Анализирую описание и генерирую ключевые слова...' if lang == 'ru' else '🤖 Analyzing and generating keywords...'
     status_msg = await message.answer(gen_text)
     
     try:
         from utils.ai_helpers import generate_keywords
-        keywords = await generate_keywords(niche)
+        keywords = await generate_keywords(description)
         
         if not keywords:
-            err = '❌ Не удалось сгенерировать ключевые слова' if lang == 'ru' else '❌ Could not generate keywords'
+            err = '❌ Не удалось сгенерировать ключевые слова. Попробуйте описать подробнее.' if lang == 'ru' else '❌ Could not generate keywords. Try a more detailed description.'
             await status_msg.edit_text(err)
             await state.clear()
             return
         
-        # Сохраняем ключевые слова
-        async with async_session_maker() as session:
-            active_project = await ProjectCRUD.get_active(session, user.id)
-            
-            if not active_project:
-                err = '❌ Проект не найден!' if lang == 'ru' else '❌ Project not found!'
-                await status_msg.edit_text(err)
-                await state.clear()
-                return
-            
-            added_count = 0
-            for keyword in keywords:
-                if keyword.strip():
-                    await KeywordCRUD.add(session, active_project.id, keyword.strip(), KeywordType.INCLUDE)
-                    added_count += 1
-            
-            # Инвалидируем кэш (опционально, не падаем если Redis недоступен)
-            try:
-                from utils.cache import CacheService
-                await CacheService.invalidate_project_keywords(active_project.id)
-            except Exception as cache_err:
-                logger.warning(f"Cache invalidation failed: {cache_err}")
+        # Сохраняем предложенные ключевые слова в состояние
+        await state.update_data(suggested_keywords=keywords)
+        await state.set_state(KeywordStates.selecting_ai_keywords)
         
-        await state.clear()
-        
-        # Показываем результат
-        keywords_preview = '\n'.join([f'• {kw}' for kw in keywords[:10]])
+        # Показываем предложения с кнопками
         if lang == 'ru':
-            text = f'✅ <b>Добавлено {added_count} ключевых слов!</b>\n\n{keywords_preview}'
+            text = f'''🤖 <b>AI предлагает {len(keywords)} ключевых слов:</b>
+
+Нажмите на слово чтобы <b>добавить</b> его.
+Или используйте кнопки ниже.
+
+'''
         else:
-            text = f'✅ <b>Added {added_count} keywords!</b>\n\n{keywords_preview}'
+            text = f'''🤖 <b>AI suggests {len(keywords)} keywords:</b>
+
+Click on a word to <b>add</b> it.
+Or use the buttons below.
+
+'''
         
-        if len(keywords) > 10:
-            more = f'и ещё {len(keywords) - 10}' if lang == 'ru' else f'and {len(keywords) - 10} more'
-            text += f'\n\n... {more}'
+        # Показываем превью
+        for i, kw in enumerate(keywords[:20], 1):
+            text += f'{i}. {kw}\n'
         
-        await status_msg.edit_text(text, parse_mode='HTML')
-        menu_text = 'Вернуться в меню:' if lang == 'ru' else 'Return to menu:'
-        await message.answer(menu_text, reply_markup=main_menu_kb(lang))
+        if len(keywords) > 20:
+            more = len(keywords) - 20
+            text += f'\n... и ещё {more}' if lang == 'ru' else f'\n... and {more} more'
+        
+        # Создаём клавиатуру с кнопками
+        keyboard = ai_keywords_selection_kb(keywords[:20], lang)
+        
+        await status_msg.edit_text(text, parse_mode='HTML', reply_markup=keyboard)
         
     except ValueError as e:
         logger.error(f"AI keywords ValueError: {e}")
         await status_msg.edit_text(f'❌ Ошибка: {str(e)}')
         await state.clear()
     except Exception as e:
+        logger.error(f"AI keywords error: {e}", exc_info=True)
+        err = '❌ Произошла ошибка. Попробуйте позже.' if lang == 'ru' else '❌ An error occurred. Try again later.'
+        await status_msg.edit_text(err)
+        await state.clear()
+
+
+@router.callback_query(F.data.startswith('ai_kw:add:'))
+async def add_ai_keyword(callback: CallbackQuery, user: User, state: FSMContext):
+    """Добавить одно ключевое слово из AI предложений"""
+    keyword_index = int(callback.data.split(':')[2])
+    
+    data = await state.get_data()
+    keywords = data.get('suggested_keywords', [])
+    
+    if keyword_index >= len(keywords):
+        await callback.answer('❌ Ключевое слово не найдено', show_alert=True)
+        return
+    
+    keyword = keywords[keyword_index]
+    
+    async with async_session_maker() as session:
+        active_project = await ProjectCRUD.get_active(session, user.id)
+        if not active_project:
+            await callback.answer('❌ Проект не найден!', show_alert=True)
+            return
+        
+        await KeywordCRUD.add(session, active_project.id, keyword, KeywordType.INCLUDE)
+    
+    # Отмечаем как добавленное
+    added = data.get('added_keywords', set())
+    added.add(keyword_index)
+    await state.update_data(added_keywords=added)
+    
+    await callback.answer(f'✅ Добавлено: {keyword}')
+
+
+@router.callback_query(F.data == 'ai_kw:add_all')
+async def add_all_ai_keywords(callback: CallbackQuery, user: User, state: FSMContext):
+    """Добавить все AI ключевые слова"""
+    data = await state.get_data()
+    keywords = data.get('suggested_keywords', [])
+    
+    if not keywords:
+        await callback.answer('❌ Нет ключевых слов', show_alert=True)
+        return
+    
+    async with async_session_maker() as session:
+        active_project = await ProjectCRUD.get_active(session, user.id)
+        if not active_project:
+            await callback.answer('❌ Проект не найден!', show_alert=True)
+            return
+        
+        added_count = 0
+        for keyword in keywords:
+            await KeywordCRUD.add(session, active_project.id, keyword, KeywordType.INCLUDE)
+            added_count += 1
+        
+        # Инвалидируем кэш
+        try:
+            from utils.cache import CacheService
+            await CacheService.invalidate_project_keywords(active_project.id)
+        except Exception:
+            pass
+    
+    await state.clear()
+    
+    lang = user.language
+    text = f'✅ Добавлено {added_count} ключевых слов!' if lang == 'ru' else f'✅ Added {added_count} keywords!'
+    await callback.message.edit_text(text)
+    await callback.message.answer(
+        get_text('main_menu', lang),
+        reply_markup=main_menu_kb(lang)
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == 'ai_kw:done')
+async def finish_ai_keywords(callback: CallbackQuery, user: User, state: FSMContext):
+    """Завершить выбор AI ключевых слов"""
+    data = await state.get_data()
+    added = data.get('added_keywords', set())
+    
+    await state.clear()
+    
+    lang = user.language
+    count = len(added)
+    
+    if count > 0:
+        text = f'✅ Добавлено {count} ключевых слов!' if lang == 'ru' else f'✅ Added {count} keywords!'
+    else:
+        text = '👌 Ключевые слова не добавлены' if lang == 'ru' else '👌 No keywords added'
+    
+    await callback.message.edit_text(text)
+    await callback.message.answer(
+        get_text('main_menu', lang),
+        reply_markup=main_menu_kb(lang)
+    )
+    await callback.answer()
         logger.error(f"AI keywords error: {e}", exc_info=True)
         err = '❌ Произошла ошибка при генерации' if lang == 'ru' else '❌ Error during generation'
         await status_msg.edit_text(err)
