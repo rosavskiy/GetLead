@@ -369,18 +369,6 @@ async def finish_ai_keywords(callback: CallbackQuery, user: User, state: FSMCont
         reply_markup=main_menu_kb(lang)
     )
     await callback.answer()
-        logger.error(f"AI keywords error: {e}", exc_info=True)
-        err = '❌ Произошла ошибка при генерации' if lang == 'ru' else '❌ Error during generation'
-        await status_msg.edit_text(err)
-        await state.clear()
-        
-    except ValueError as e:
-        await status_msg.edit_text(f'❌ Ошибка: {str(e)}')
-        await state.clear()
-    except Exception as e:
-        err = '❌ Произошла ошибка при генерации' if lang == 'ru' else '❌ Error during generation'
-        await status_msg.edit_text(err)
-        await state.clear()
 
 
 # ============ ИСКЛЮЧАЮЩИЕ СЛОВА ============
