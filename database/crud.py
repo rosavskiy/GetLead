@@ -239,15 +239,18 @@ class ChatCRUD:
                 project.chats.remove(chat)
                 await session.commit()
                 
-                # Обновляем данные чата после удаления связи
-                await session.refresh(chat)
+                # Перезагружаем чат с projects чтобы проверить есть ли ещё связи
+                result = await session.execute(
+                    select(Chat).where(Chat.id == chat_id).options(selectinload(Chat.projects))
+                )
+                chat = result.scalar_one_or_none()
                 
                 # Если чат больше не привязан ни к одному проекту - удаляем из БД
-                if not chat.projects:
+                if chat and not chat.projects:
                     logger.info(f"Чат {chat.telegram_link} больше не привязан к проектам, удаляем из БД")
                     await session.delete(chat)
                     await session.commit()
-                    logger.info(f"Чат {chat.telegram_link} удалён из БД")
+                    logger.info(f"Чат удалён из БД")
                 
                 return True
             
