@@ -1,4 +1,5 @@
 """Обработчики для работы с ключевыми словами"""
+import logging
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
@@ -9,6 +10,8 @@ from database.models import User, KeywordType
 from bot.states import KeywordStates, ExcludeStates
 from bot.texts import get_text
 from bot.keyboards import keywords_menu_kb, exclude_menu_kb, cancel_kb, main_menu_kb
+
+logger = logging.getLogger(__name__)
 
 router = Router()
 
@@ -157,9 +160,12 @@ async def process_ai_keywords(message: Message, user: User, state: FSMContext):
                     await KeywordCRUD.add(session, active_project.id, keyword.strip(), KeywordType.INCLUDE)
                     added_count += 1
             
-            # Инвалидируем кэш
-            from utils.cache import CacheService
-            await CacheService.invalidate_project_keywords(active_project.id)
+            # Инвалидируем кэш (опционально, не падаем если Redis недоступен)
+            try:
+                from utils.cache import CacheService
+                await CacheService.invalidate_project_keywords(active_project.id)
+            except Exception as cache_err:
+                logger.warning(f"Cache invalidation failed: {cache_err}")
         
         await state.clear()
         
@@ -177,6 +183,16 @@ async def process_ai_keywords(message: Message, user: User, state: FSMContext):
         await status_msg.edit_text(text, parse_mode='HTML')
         menu_text = 'Вернуться в меню:' if lang == 'ru' else 'Return to menu:'
         await message.answer(menu_text, reply_markup=main_menu_kb(lang))
+        
+    except ValueError as e:
+        logger.error(f"AI keywords ValueError: {e}")
+        await status_msg.edit_text(f'❌ Ошибка: {str(e)}')
+        await state.clear()
+    except Exception as e:
+        logger.error(f"AI keywords error: {e}", exc_info=True)
+        err = '❌ Произошла ошибка при генерации' if lang == 'ru' else '❌ Error during generation'
+        await status_msg.edit_text(err)
+        await state.clear()
         
     except ValueError as e:
         await status_msg.edit_text(f'❌ Ошибка: {str(e)}')

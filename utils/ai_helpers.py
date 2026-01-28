@@ -369,6 +369,8 @@ async def generate_keywords(niche: str) -> List[str]:
 
 Верни ТОЛЬКО список слов/фраз, каждое с новой строки, без нумерации и пояснений."""
 
+        logger.info(f"Generating keywords for niche: '{niche}'")
+        
         response = await client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
@@ -382,9 +384,17 @@ async def generate_keywords(niche: str) -> List[str]:
         keywords_text = response.choices[0].message.content.strip()
         keywords = [kw.strip() for kw in keywords_text.split('\n') if kw.strip()]
         
+        logger.info(f"Generated {len(keywords)} keywords")
         return keywords
+        
+    except Exception as e:
+        logger.error(f"Error generating keywords: {e}", exc_info=True)
+        raise
     finally:
-        await client.close()
+        try:
+            await client.close()
+        except Exception:
+            pass  # Игнорируем ошибки закрытия
 
 
 async def generate_exclude_words(niche: str) -> List[str]:
@@ -415,6 +425,8 @@ async def generate_exclude_words(niche: str) -> List[str]:
 
 Верни ТОЛЬКО список слов, каждое с новой строки, без нумерации и пояснений."""
 
+        logger.info(f"Generating exclude words for niche: '{niche}'")
+        
         response = await client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
@@ -428,9 +440,17 @@ async def generate_exclude_words(niche: str) -> List[str]:
         words_text = response.choices[0].message.content.strip()
         words = [w.strip() for w in words_text.split('\n') if w.strip()]
         
+        logger.info(f"Generated {len(words)} exclude words")
         return words
+        
+    except Exception as e:
+        logger.error(f"Error generating exclude words: {e}", exc_info=True)
+        raise
     finally:
-        await client.close()
+        try:
+            await client.close()
+        except Exception:
+            pass  # Игнорируем ошибки закрытия
 
 
 async def suggest_chats(niche: str, min_subscribers: int = 1000) -> List[dict]:
@@ -584,8 +604,14 @@ async def suggest_chat_names_ai(niche: str) -> List[str]:
         chats = [c.strip() for c in chats_text.split('\n') if c.strip()]
         
         return chats
+    except Exception as e:
+        logger.error(f"Error in suggest_chat_names_ai: {e}")
+        return []
     finally:
-        await client.close()
+        try:
+            await client.close()
+        except Exception:
+            pass
 
 
 async def generate_filters(niche: str, keywords: List[str]) -> List[str]:
@@ -624,6 +650,8 @@ async def generate_filters(niche: str, keywords: List[str]) -> List[str]:
 
 Верни ТОЛЬКО список фильтров, каждый с новой строки, без пояснений."""
 
+        logger.info(f"Generating filters for niche: '{niche}'")
+        
         response = await client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
@@ -637,6 +665,14 @@ async def generate_filters(niche: str, keywords: List[str]) -> List[str]:
         filters_text = response.choices[0].message.content.strip()
         filters = [f.strip() for f in filters_text.split('\n') if f.strip()]
         
+        logger.info(f"Generated {len(filters)} filters")
         return filters
+        
+    except Exception as e:
+        logger.error(f"Error generating filters: {e}", exc_info=True)
+        raise
     finally:
-        await client.close()
+        try:
+            await client.close()
+        except Exception:
+            pass
