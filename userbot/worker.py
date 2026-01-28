@@ -315,14 +315,22 @@ class UserbotWorker:
         try:
             chat_id = event.chat_id
             
-            # Логируем ВСЕ входящие события
-            logger.info(f"🔔 NewMessage: chat_id={chat_id}, text='{(event.message.message or '')[:50]}'")
+            # Нормализуем chat_id (убираем -100 префикс для супергрупп)
+            normalized_chat_id = chat_id
+            if chat_id and chat_id < 0:
+                # Для супергрупп Telegram возвращает -100XXXXXXXXXX
+                chat_id_str = str(chat_id)
+                if chat_id_str.startswith('-100'):
+                    normalized_chat_id = int(chat_id_str[4:])
             
-            is_monitored = chat_id in self.monitored_chats
+            # Логируем ВСЕ входящие события
+            logger.info(f"🔔 NewMessage: chat_id={chat_id}, normalized={normalized_chat_id}, text='{(event.message.message or '')[:50]}'")
+            
+            is_monitored = normalized_chat_id in self.monitored_chats
             
             # Проверяем, что сообщение из мониторируемого чата
             if not is_monitored:
-                logger.debug(f"⏭️ Чат {chat_id} не мониторится")
+                logger.debug(f"⏭️ Чат {normalized_chat_id} не мониторится")
                 return
             
             # Получаем текст сообщения
