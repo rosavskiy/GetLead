@@ -4,66 +4,65 @@ import re
 import logging
 import httpx
 import asyncio
+import json
+import uuid
 from openai import AsyncOpenAI
 from typing import List, Optional, Dict, Any
-from telethon import TelegramClient, functions
-from telethon.tl.types import Channel, Chat as TelegramChat
-from telethon.errors import FloodWaitError, ChannelPrivateError, UsernameNotOccupiedError, UsernameInvalidError
+import redis.asyncio as redis
 from config import settings
 
 logger = logging.getLogger(__name__)
 
-# Глобальный клиент для поиска чатов (создаётся один раз)
-_search_client: Optional[TelegramClient] = None
-_search_client_lock = asyncio.Lock()
 
-
-async def get_search_client() -> Optional[TelegramClient]:
-    """Получить Telethon клиент для поиска чатов"""
-    global _search_client
+async def search_telegram_chats_via_redis(query: str, timeout: int = 30) -> List[Dict[str, Any]]:
+    """
+    Поиск чатов через Redis-очередь (запрос обрабатывается юзерботом)
     
-    async with _search_client_lock:
-        if _search_client is not None and _search_client.is_connected():
-            return _search_client
+    Args:
+        query: Поисковый запрос
+        timeout: Таймаут ожидания ответа в секундах
         
-        # Берём первый доступный юзербот из userbots_config
-        userbots = settings.userbots_config
-        if not userbots:
-            logger.warning("No userbot sessions configured for chat search")
-            return None
+    Returns:
+        Список найденных чатов
+    """
+    try:
+        redis_client = redis.from_url(settings.REDIS_URL)
         
-        session = userbots[0]
-        try:
-            import os
-            # Абсолютный путь к сессии (в той же директории где запускается юзербот)
-            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            session_path = os.path.join(base_dir, session['session_name'])
-            
-            logger.info(f"Trying to connect search client with session: {session_path}")
-            
-            client = TelegramClient(
-                session_path,
-                session['api_id'],
-                session['api_hash']
-            )
-            await client.connect()
-            
-            if not await client.is_user_authorized():
-                logger.warning(f"Session {session['session_name']} not authorized")
-                return None
-            
-            _search_client = client
-            logger.info("Search client connected successfully")
-            return _search_client
-            
-        except Exception as e:
-            logger.error(f"Failed to create search client: {e}")
-            return None
+        # Генерируем уникальный ID запроса
+        request_id = str(uuid.uuid4())
+        
+        # Отправляем запрос в очередь
+        request = {
+            'query': query,
+            'request_id': request_id
+        }
+        await redis_client.rpush('chat_search_requests', json.dumps(request))
+        
+        logger.info(f"Sent search request to userbot: '{query}' (id: {request_id})")
+        
+        # Ждём ответа
+        response_key = f'chat_search_response:{request_id}'
+        
+        for _ in range(timeout * 2):  # Проверяем каждые 0.5 секунды
+            result = await redis_client.get(response_key)
+            if result:
+                await redis_client.delete(response_key)
+                await redis_client.close()
+                return json.loads(result)
+            await asyncio.sleep(0.5)
+        
+        logger.warning(f"Search request timed out: '{query}'")
+        await redis_client.close()
+        return []
+        
+    except Exception as e:
+        logger.error(f"Redis search error: {e}")
+        return []
 
 
 async def search_telegram_chats(query: str, limit: int = 30) -> List[Dict[str, Any]]:
     """
-    УМНЫЙ поиск чатов через Telegram Global Search API
+    УМНЫЙ поиск чатов через Redis (запрос выполняется юзерботом)
     
     Использует messages.SearchGlobal для поиска по содержимому сообщений,
     затем извлекает уникальные чаты и сортирует по количеству участников.
@@ -72,212 +71,13 @@ async def search_telegram_chats(query: str, limit: int = 30) -> List[Dict[str, A
     
     Args:
         query: Поисковый запрос
-        limit: Максимальное количество сообщений для анализа
+        limit: Не используется (для совместимости)
         
     Returns:
         Список словарей с информацией о РЕАЛЬНЫХ чатах, отсортированный по участникам
     """
-    results = []
-    seen_chat_ids = set()
-    client = await get_search_client()
-    
-    if not client:
-        logger.warning("No client available for Telegram search")
-        return []
-    
-    try:
-        from telethon.tl.types import InputMessagesFilterEmpty, InputPeerEmpty
-        from telethon.tl.functions.messages import SearchGlobalRequest
-        
-        # Глобальный поиск по сообщениям - находит чаты где обсуждают тему
-        search_result = await client(SearchGlobalRequest(
-            q=query,
-            filter=InputMessagesFilterEmpty(),
-            min_date=None,
-            max_date=None,
-            offset_rate=0,
-            offset_peer=InputPeerEmpty(),
-            offset_id=0,
-            limit=limit
-        ))
-        
-        # Собираем все чаты из результатов
-        chats_map = {c.id: c for c in search_result.chats}
-        
-        # Считаем сколько раз каждый чат встретился (релевантность)
-        chat_relevance = {}
-        for msg in search_result.messages:
-            chat_id = getattr(msg, 'peer_id', None)
-            if chat_id:
-                # Извлекаем реальный ID
-                real_id = getattr(chat_id, 'channel_id', None) or getattr(chat_id, 'chat_id', None)
-                if real_id:
-                    chat_relevance[real_id] = chat_relevance.get(real_id, 0) + 1
-        
-        # Обрабатываем найденные чаты
-        for chat in search_result.chats:
-            try:
-                if chat.id in seen_chat_ids:
-                    continue
-                seen_chat_ids.add(chat.id)
-                
-                # Только чаты с username (публичные)
-                if not hasattr(chat, 'username') or not chat.username:
-                    continue
-                
-                # Получаем количество участников
-                subscribers = getattr(chat, 'participants_count', None)
-                
-                # Определяем тип чата
-                chat_type = 'unknown'
-                if isinstance(chat, Channel):
-                    if chat.megagroup:
-                        chat_type = 'supergroup'
-                    elif chat.broadcast:
-                        chat_type = 'channel'
-                    else:
-                        chat_type = 'group'
-                
-                # Релевантность = сколько сообщений найдено в этом чате
-                relevance = chat_relevance.get(chat.id, 0)
-                
-                results.append({
-                    'username': f'@{chat.username}',
-                    'title': getattr(chat, 'title', chat.username),
-                    'link': f't.me/{chat.username}',
-                    'subscribers': subscribers,
-                    'type': chat_type,
-                    'relevance': relevance,
-                    'source': 'telegram_global_search',
-                    'verified': True
-                })
-                    
-            except Exception as e:
-                logger.warning(f"Error processing chat: {e}")
-                continue
-        
-        # Дополнительно ищем через contacts.Search (по названию)
-        try:
-            contacts_result = await client(functions.contacts.SearchRequest(
-                q=query,
-                limit=20
-            ))
-            
-            for chat in contacts_result.chats:
-                try:
-                    if chat.id in seen_chat_ids:
-                        continue
-                    seen_chat_ids.add(chat.id)
-                    
-                    if not hasattr(chat, 'username') or not chat.username:
-                        continue
-                    
-                    subscribers = getattr(chat, 'participants_count', None)
-                    
-                    chat_type = 'unknown'
-                    if isinstance(chat, Channel):
-                        if chat.megagroup:
-                            chat_type = 'supergroup'
-                        elif chat.broadcast:
-                            chat_type = 'channel'
-                        else:
-                            chat_type = 'group'
-                    
-                    results.append({
-                        'username': f'@{chat.username}',
-                        'title': getattr(chat, 'title', chat.username),
-                        'link': f't.me/{chat.username}',
-                        'subscribers': subscribers,
-                        'type': chat_type,
-                        'relevance': 5,  # Бонус за совпадение по названию
-                        'source': 'telegram_contacts_search',
-                        'verified': True
-                    })
-                except Exception:
-                    continue
-                    
-        except Exception as e:
-            logger.warning(f"Contacts search failed: {e}")
-        
-        # Сортируем: сначала по релевантности, потом по подписчикам
-        results.sort(key=lambda x: (
-            -x.get('relevance', 0),
-            -(x.get('subscribers') or 0)
-        ))
-        
-        logger.info(f"Telegram smart search found {len(results)} unique chats for '{query}'")
-        
-    except FloodWaitError as e:
-        logger.warning(f"Telegram flood wait: {e.seconds}s")
-        await asyncio.sleep(min(e.seconds, 30))
-    except Exception as e:
-        logger.error(f"Telegram search error: {e}", exc_info=True)
-    
-    return results
-
-
-async def verify_chat_exists(username: str) -> Optional[Dict[str, Any]]:
-    """
-    Проверить существование чата и получить информацию о нём
-    
-    Args:
-        username: Username чата (с @ или без)
-        
-    Returns:
-        Информация о чате или None если не существует
-    """
-    client = await get_search_client()
-    
-    if not client:
-        return None
-    
-    # Убираем @ если есть
-    username = username.lstrip('@')
-    
-    try:
-        entity = await client.get_entity(username)
-        
-        subscribers = None
-        chat_type = 'unknown'
-        
-        if isinstance(entity, Channel):
-            # Получаем полную информацию о канале
-            full = await client(functions.channels.GetFullChannelRequest(entity))
-            subscribers = full.full_chat.participants_count
-            
-            if entity.megagroup:
-                chat_type = 'supergroup'
-            elif entity.broadcast:
-                chat_type = 'channel'
-            else:
-                chat_type = 'group'
-        elif isinstance(entity, TelegramChat):
-            subscribers = entity.participants_count
-            chat_type = 'group'
-        
-        return {
-            'username': f'@{username}',
-            'title': getattr(entity, 'title', username),
-            'link': f't.me/{username}',
-            'subscribers': subscribers,
-            'type': chat_type,
-            'source': 'telegram_verified',
-            'verified': True
-        }
-        
-    except (UsernameNotOccupiedError, UsernameInvalidError):
-        logger.info(f"Chat @{username} does not exist")
-        return None
-    except ChannelPrivateError:
-        logger.info(f"Chat @{username} is private")
-        return None
-    except FloodWaitError as e:
-        logger.warning(f"Flood wait: {e.seconds}s")
-        await asyncio.sleep(min(e.seconds, 30))
-        return None
-    except Exception as e:
-        logger.warning(f"Error verifying @{username}: {e}")
-        return None
+    # Делегируем поиск юзерботу через Redis
+    return await search_telegram_chats_via_redis(query, timeout=25)
 
 
 def get_openai_client() -> Optional[AsyncOpenAI]:

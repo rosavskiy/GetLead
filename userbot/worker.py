@@ -59,8 +59,170 @@ class UserbotWorker:
         # Запускаем фоновую задачу проверки новых чатов
         asyncio.create_task(self.check_new_chats_periodically())
         
+        # Запускаем обработчик запросов на поиск чатов через Redis
+        asyncio.create_task(self.process_search_requests())
+        
         # Запускаем клиента
         await self.client.run_until_disconnected()
+    
+    async def process_search_requests(self):
+        """Обработка запросов на поиск чатов через Redis"""
+        import redis.asyncio as redis
+        
+        try:
+            redis_client = redis.from_url(settings.REDIS_URL)
+            logger.info(f"🔍 {self.session_name}: Слушаю запросы на поиск чатов...")
+            
+            while True:
+                try:
+                    # Ждём запрос из очереди (блокирующий вызов с таймаутом)
+                    result = await redis_client.blpop('chat_search_requests', timeout=5)
+                    
+                    if result:
+                        _, request_data = result
+                        request = json.loads(request_data)
+                        
+                        query = request.get('query', '')
+                        request_id = request.get('request_id', '')
+                        
+                        logger.info(f"🔍 Поиск чатов по запросу: '{query}'")
+                        
+                        # Выполняем поиск
+                        results = await self.search_chats(query)
+                        
+                        # Сохраняем результат в Redis
+                        response_key = f'chat_search_response:{request_id}'
+                        await redis_client.setex(
+                            response_key, 
+                            60,  # TTL 60 секунд
+                            json.dumps(results)
+                        )
+                        
+                        logger.info(f"✅ Найдено {len(results)} чатов для '{query}'")
+                        
+                except Exception as e:
+                    logger.error(f"Ошибка обработки поискового запроса: {e}")
+                    await asyncio.sleep(1)
+                    
+        except Exception as e:
+            logger.error(f"Ошибка подключения к Redis для поиска: {e}")
+    
+    async def search_chats(self, query: str) -> list:
+        """Поиск чатов через Telegram API"""
+        results = []
+        seen_chat_ids = set()
+        
+        try:
+            from telethon.tl.types import InputMessagesFilterEmpty, InputPeerEmpty
+            from telethon.tl.functions.messages import SearchGlobalRequest
+            
+            # 1. Глобальный поиск по сообщениям
+            search_result = await self.client(SearchGlobalRequest(
+                q=query,
+                filter=InputMessagesFilterEmpty(),
+                min_date=None,
+                max_date=None,
+                offset_rate=0,
+                offset_peer=InputPeerEmpty(),
+                offset_id=0,
+                limit=30
+            ))
+            
+            # Считаем релевантность
+            chat_relevance = {}
+            for msg in search_result.messages:
+                chat_id = getattr(msg, 'peer_id', None)
+                if chat_id:
+                    real_id = getattr(chat_id, 'channel_id', None) or getattr(chat_id, 'chat_id', None)
+                    if real_id:
+                        chat_relevance[real_id] = chat_relevance.get(real_id, 0) + 1
+            
+            # Обрабатываем чаты
+            for chat in search_result.chats:
+                try:
+                    if chat.id in seen_chat_ids:
+                        continue
+                    seen_chat_ids.add(chat.id)
+                    
+                    if not hasattr(chat, 'username') or not chat.username:
+                        continue
+                    
+                    subscribers = getattr(chat, 'participants_count', None)
+                    
+                    chat_type = 'unknown'
+                    if isinstance(chat, Channel):
+                        if chat.megagroup:
+                            chat_type = 'supergroup'
+                        elif chat.broadcast:
+                            chat_type = 'channel'
+                        else:
+                            chat_type = 'group'
+                    
+                    relevance = chat_relevance.get(chat.id, 0)
+                    
+                    results.append({
+                        'username': f'@{chat.username}',
+                        'title': getattr(chat, 'title', chat.username),
+                        'link': f't.me/{chat.username}',
+                        'subscribers': subscribers,
+                        'type': chat_type,
+                        'relevance': relevance,
+                        'verified': True
+                    })
+                except Exception:
+                    continue
+            
+            # 2. Дополнительный поиск по названию
+            try:
+                contacts_result = await self.client(functions.contacts.SearchRequest(
+                    q=query,
+                    limit=20
+                ))
+                
+                for chat in contacts_result.chats:
+                    try:
+                        if chat.id in seen_chat_ids:
+                            continue
+                        seen_chat_ids.add(chat.id)
+                        
+                        if not hasattr(chat, 'username') or not chat.username:
+                            continue
+                        
+                        subscribers = getattr(chat, 'participants_count', None)
+                        
+                        chat_type = 'unknown'
+                        if isinstance(chat, Channel):
+                            if chat.megagroup:
+                                chat_type = 'supergroup'
+                            elif chat.broadcast:
+                                chat_type = 'channel'
+                            else:
+                                chat_type = 'group'
+                        
+                        results.append({
+                            'username': f'@{chat.username}',
+                            'title': getattr(chat, 'title', chat.username),
+                            'link': f't.me/{chat.username}',
+                            'subscribers': subscribers,
+                            'type': chat_type,
+                            'relevance': 5,
+                            'verified': True
+                        })
+                    except Exception:
+                        continue
+            except Exception as e:
+                logger.warning(f"Contacts search failed: {e}")
+            
+            # Сортируем
+            results.sort(key=lambda x: (-x.get('relevance', 0), -(x.get('subscribers') or 0)))
+            
+        except FloodWaitError as e:
+            logger.warning(f"Flood wait: {e.seconds}s")
+            await asyncio.sleep(min(e.seconds, 30))
+        except Exception as e:
+            logger.error(f"Search error: {e}")
+        
+        return results[:20]
     
     async def check_new_chats_periodically(self):
         """Периодическая проверка новых чатов (каждые 60 секунд)"""
