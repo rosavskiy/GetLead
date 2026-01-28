@@ -34,8 +34,15 @@ async def get_search_client() -> Optional[TelegramClient]:
         
         session = userbots[0]
         try:
+            import os
+            # Абсолютный путь к сессии (в той же директории где запускается юзербот)
+            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            session_path = os.path.join(base_dir, session['session_name'])
+            
+            logger.info(f"Trying to connect search client with session: {session_path}")
+            
             client = TelegramClient(
-                f"sessions/{session['session_name']}",
+                session_path,
                 session['api_id'],
                 session['api_hash']
             )
