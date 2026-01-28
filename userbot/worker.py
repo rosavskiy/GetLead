@@ -72,19 +72,24 @@ class UserbotWorker:
         """Слушаем Redis для немедленной перезагрузки чатов"""
         import redis.asyncio as redis
         
-        try:
-            redis_client = redis.from_url(settings.REDIS_URL)
-            pubsub = redis_client.pubsub()
-            await pubsub.subscribe('userbot:reload_chats')
-            logger.info(f"📡 {self.session_name}: Слушаю сигналы на перезагрузку чатов...")
-            
-            async for message in pubsub.listen():
-                if message['type'] == 'message':
-                    logger.info(f"📥 Получен сигнал reload_chats, перезагружаю чаты...")
-                    await self.load_chats()
-                    
-        except Exception as e:
-            logger.error(f"❌ Ошибка Redis pubsub: {e}")
+        while True:
+            try:
+                redis_client = redis.from_url(settings.REDIS_URL)
+                pubsub = redis_client.pubsub()
+                await pubsub.subscribe('userbot:reload_chats')
+                logger.info(f"📡 {self.session_name}: Слушаю сигналы на перезагрузку чатов...")
+                
+                async for message in pubsub.listen():
+                    if message['type'] == 'message':
+                        logger.info(f"📥 Получен сигнал reload_chats, перезагружаю чаты...")
+                        await self.load_chats()
+                        
+            except asyncio.CancelledError:
+                logger.info("Pubsub listener cancelled")
+                break
+            except Exception as e:
+                logger.error(f"❌ Ошибка Redis pubsub: {e}, переподключаюсь через 5 сек...")
+                await asyncio.sleep(5)
     
     async def process_search_requests(self):
         """Обработка запросов на поиск чатов через Redis"""
@@ -221,11 +226,27 @@ class UserbotWorker:
         logger.info("Загрузка чатов для мониторинга...")
         
         async with async_session_maker() as session:
-            from sqlalchemy import select
+            from sqlalchemy import select, update, or_
+            
+            # Загружаем чаты назначенные этому юзерботу ИЛИ без назначения
             result = await session.execute(
-                select(Chat).where(Chat.assigned_userbot == self.session_name)
+                select(Chat).where(
+                    or_(
+                        Chat.assigned_userbot == self.session_name,
+                        Chat.assigned_userbot == None
+                    )
+                )
             )
             chats = result.scalars().all()
+            
+            # Назначаем неназначенные чаты этому юзерботу
+            for chat in chats:
+                if chat.assigned_userbot is None:
+                    await session.execute(
+                        update(Chat).where(Chat.id == chat.id).values(assigned_userbot=self.session_name)
+                    )
+                    logger.info(f"📌 Назначил чат {chat.telegram_link} юзерботу {self.session_name}")
+            await session.commit()
             
             logger.info(f"📋 Найдено {len(chats)} чатов для {self.session_name}")
             
