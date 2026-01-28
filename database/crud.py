@@ -210,7 +210,7 @@ class ChatCRUD:
     
     @staticmethod
     async def remove_from_project(session: AsyncSession, chat_id: int, project_id: int) -> bool:
-        """Удалить чат из проекта"""
+        """Удалить чат из проекта. Если чат больше не привязан ни к одному проекту - удаляем из БД"""
         try:
             result = await session.execute(
                 select(Project).where(Project.id == project_id).options(selectinload(Project.chats))
@@ -220,7 +220,9 @@ class ChatCRUD:
             if not project:
                 return False
             
-            result = await session.execute(select(Chat).where(Chat.id == chat_id))
+            result = await session.execute(
+                select(Chat).where(Chat.id == chat_id).options(selectinload(Chat.projects))
+            )
             chat = result.scalar_one_or_none()
             
             if not chat:
@@ -229,6 +231,15 @@ class ChatCRUD:
             if chat in project.chats:
                 project.chats.remove(chat)
                 await session.commit()
+                
+                # Обновляем данные чата после удаления связи
+                await session.refresh(chat)
+                
+                # Если чат больше не привязан ни к одному проекту - удаляем из БД
+                if not chat.projects:
+                    await session.delete(chat)
+                    await session.commit()
+                
                 return True
             
             return False
