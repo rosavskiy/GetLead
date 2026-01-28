@@ -87,24 +87,31 @@ async def process_chat_link(message: Message, user: User, state: FSMContext):
         existing_chat = await ChatCRUD.get_by_link(session, link)
         
         if existing_chat:
-            # Чат уже существует, просто привязываем к проекту
+            # Чат уже существует, привязываем к проекту
             await ChatCRUD.assign_to_project(session, existing_chat.id, active_project.id)
+            
+            # Проверяем назначен ли юзербот - если нет, назначаем
+            if not existing_chat.assigned_userbot:
+                from userbot.load_balancer import UserbotLoadBalancer
+                await UserbotLoadBalancer.assign_userbot_for_chat(session, existing_chat.id)
+                logger.info(f"Назначен юзербот для существующего чата {link}")
+            
             text = get_text('chat_exists', user.language)
         else:
             # Создаем новый чат
             chat = await ChatCRUD.add(session, link)
             await ChatCRUD.assign_to_project(session, chat.id, active_project.id)
             text = get_text('chat_added', user.language, chat_link=link)
-            
-            # Немедленно уведомляем юзербота о новом чате через Redis
-            try:
-                import redis.asyncio as redis
-                from config import settings
-                redis_client = redis.from_url(settings.REDIS_URL)
-                await redis_client.publish('userbot:reload_chats', 'reload')
-                await redis_client.close()
-            except Exception as e:
-                logger.warning(f"Не удалось уведомить юзербота: {e}")
+        
+        # Всегда уведомляем юзербота о новом/обновленном чате через Redis
+        try:
+            import redis.asyncio as redis
+            from config import settings
+            redis_client = redis.from_url(settings.REDIS_URL)
+            await redis_client.publish('userbot:reload_chats', 'reload')
+            await redis_client.close()
+        except Exception as e:
+            logger.warning(f"Не удалось уведомить юзербота: {e}")
     
     await state.clear()
     await message.answer(text, reply_markup=main_menu_kb(user.language))
