@@ -70,6 +70,7 @@ async def process_chat_link(message: Message, user: User, state: FSMContext):
     
     # Валидация ссылки
     link = message.text.strip()
+    logger.info(f"📩 Добавление чата: {link} от пользователя {user.id}")
     
     # Проверяем формат ссылки
     if not re.match(r'https?://t\.me/[\w\d_]+', link):
@@ -85,20 +86,33 @@ async def process_chat_link(message: Message, user: User, state: FSMContext):
         
         # Проверяем, есть ли уже такой чат
         existing_chat = await ChatCRUD.get_by_link(session, link)
+        logger.info(f"📋 existing_chat: {existing_chat}, assigned_userbot: {existing_chat.assigned_userbot if existing_chat else 'N/A'}, is_joined: {existing_chat.is_joined if existing_chat else 'N/A'}")
         
         if existing_chat:
             # Чат уже существует, привязываем к проекту
             await ChatCRUD.assign_to_project(session, existing_chat.id, active_project.id)
             
+            # Сбрасываем is_joined если чат не вступлен
+            if not existing_chat.is_joined:
+                from sqlalchemy import update
+                await session.execute(
+                    update(Chat).where(Chat.id == existing_chat.id).values(is_joined=False)
+                )
+                await session.commit()
+                logger.info(f"🔄 Сброшен is_joined для чата {link}")
+            
             # Проверяем назначен ли юзербот - если нет, назначаем
             if not existing_chat.assigned_userbot:
                 from userbot.load_balancer import UserbotLoadBalancer
                 await UserbotLoadBalancer.assign_userbot_for_chat(session, existing_chat.id)
-                logger.info(f"Назначен юзербот для существующего чата {link}")
+                logger.info(f"✅ Назначен юзербот для существующего чата {link}")
+            else:
+                logger.info(f"ℹ️ Юзербот уже назначен: {existing_chat.assigned_userbot}")
             
             text = get_text('chat_exists', user.language)
         else:
             # Создаем новый чат
+            logger.info(f"🆕 Создаём новый чат: {link}")
             chat = await ChatCRUD.add(session, link)
             await ChatCRUD.assign_to_project(session, chat.id, active_project.id)
             text = get_text('chat_added', user.language, chat_link=link)
@@ -110,8 +124,9 @@ async def process_chat_link(message: Message, user: User, state: FSMContext):
             redis_client = redis.from_url(settings.REDIS_URL)
             await redis_client.publish('userbot:reload_chats', 'reload')
             await redis_client.close()
+            logger.info(f"📡 Отправлен сигнал reload_chats в Redis")
         except Exception as e:
-            logger.warning(f"Не удалось уведомить юзербота: {e}")
+            logger.warning(f"❌ Не удалось уведомить юзербота: {e}")
     
     await state.clear()
     await message.answer(text, reply_markup=main_menu_kb(user.language))
