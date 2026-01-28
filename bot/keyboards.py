@@ -106,6 +106,42 @@ def chats_menu_kb(lang: str = 'ru') -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
+def chats_list_kb(chats: list, lang: str = 'ru') -> InlineKeyboardMarkup:
+    """Список чатов с кнопками удаления"""
+    builder = InlineKeyboardBuilder()
+    
+    for chat in chats[:20]:  # Максимум 20 чатов
+        title = chat.title or chat.telegram_link
+        if len(title) > 25:
+            title = title[:22] + '...'
+        status = '✅' if chat.is_joined else '⏳'
+        builder.button(
+            text=f'🗑 {status} {title}',
+            callback_data=f'chats:delete:{chat.id}'
+        )
+    
+    # Кнопка назад
+    builder.button(text=get_text('btn_back', lang), callback_data='menu:chats')
+    
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def confirm_delete_chat_kb(chat_id: int, lang: str = 'ru') -> InlineKeyboardMarkup:
+    """Подтверждение удаления чата"""
+    builder = InlineKeyboardBuilder()
+    
+    if lang == 'ru':
+        builder.button(text='✅ Да, удалить', callback_data=f'chats:confirm_delete:{chat_id}')
+        builder.button(text='❌ Отмена', callback_data='chats:list')
+    else:
+        builder.button(text='✅ Yes, delete', callback_data=f'chats:confirm_delete:{chat_id}')
+        builder.button(text='❌ Cancel', callback_data='chats:list')
+    
+    builder.adjust(2)
+    return builder.as_markup()
+
+
 def payment_menu_kb(current_plan: SubscriptionPlan, lang: str = 'ru') -> InlineKeyboardMarkup:
     """Меню тарифов"""
     builder = InlineKeyboardBuilder()

@@ -9,7 +9,7 @@ from database.crud import ProjectCRUD, ChatCRUD
 from database.models import User
 from bot.states import ChatStates
 from bot.texts import get_text
-from bot.keyboards import chats_menu_kb, cancel_kb, main_menu_kb
+from bot.keyboards import chats_menu_kb, cancel_kb, main_menu_kb, chats_list_kb, confirm_delete_chat_kb
 
 router = Router()
 
@@ -102,7 +102,7 @@ async def process_chat_link(message: Message, user: User, state: FSMContext):
 
 @router.callback_query(F.data == 'chats:list')
 async def list_chats(callback: CallbackQuery, user: User):
-    """Показать список всех чатов"""
+    """Показать список всех чатов с кнопками удаления"""
     async with async_session_maker() as session:
         active_project = await ProjectCRUD.get_active(session, user.id)
         
@@ -111,20 +111,79 @@ async def list_chats(callback: CallbackQuery, user: User):
             return
     
     if not active_project.chats:
-        await callback.answer('У вас пока нет добавленных чатов', show_alert=True)
+        no_chats = 'У вас пока нет добавленных чатов' if user.language == 'ru' else 'You have no chats yet'
+        await callback.answer(no_chats, show_alert=True)
         return
     
-    text = f'📁 Проект: <b>{active_project.name}</b>\n\n💬 <b>Все чаты:</b>\n\n'
+    if user.language == 'ru':
+        text = f'📁 Проект: <b>{active_project.name}</b>\n\n'
+        text += f'💬 <b>Ваши чаты ({len(active_project.chats)}):</b>\n\n'
+        text += '🗑 Нажмите на чат чтобы удалить его:'
+    else:
+        text = f'📁 Project: <b>{active_project.name}</b>\n\n'
+        text += f'💬 <b>Your chats ({len(active_project.chats)}):</b>\n\n'
+        text += '🗑 Click on a chat to delete it:'
     
-    for i, chat in enumerate(active_project.chats, 1):
-        status = '✅ Подключен' if chat.is_joined else '⏳ Ожидание'
-        title = chat.title or 'Без названия'
-        text += f'{i}. <b>{title}</b>\n'
-        text += f'   {status}\n'
-        text += f'   {chat.telegram_link}\n\n'
-    
-    await callback.message.answer(text, parse_mode='HTML')
+    await callback.message.edit_text(
+        text, 
+        parse_mode='HTML',
+        reply_markup=chats_list_kb(active_project.chats, user.language)
+    )
     await callback.answer()
+
+
+@router.callback_query(F.data.startswith('chats:delete:'))
+async def ask_delete_chat(callback: CallbackQuery, user: User):
+    """Запросить подтверждение удаления чата"""
+    chat_id = int(callback.data.split(':')[2])
+    
+    async with async_session_maker() as session:
+        chat = await ChatCRUD.get_by_id(session, chat_id)
+        
+        if not chat:
+            await callback.answer('❌ Чат не найден!', show_alert=True)
+            return
+    
+    title = chat.title or chat.telegram_link
+    
+    if user.language == 'ru':
+        text = f'🗑 <b>Удалить чат?</b>\n\n{title}\n\nЭто действие нельзя отменить.'
+    else:
+        text = f'🗑 <b>Delete chat?</b>\n\n{title}\n\nThis action cannot be undone.'
+    
+    await callback.message.edit_text(
+        text,
+        parse_mode='HTML',
+        reply_markup=confirm_delete_chat_kb(chat_id, user.language)
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith('chats:confirm_delete:'))
+async def confirm_delete_chat(callback: CallbackQuery, user: User):
+    """Подтвердить удаление чата"""
+    chat_id = int(callback.data.split(':')[2])
+    
+    async with async_session_maker() as session:
+        active_project = await ProjectCRUD.get_active(session, user.id)
+        
+        if not active_project:
+            await callback.answer('❌ Проект не найден!', show_alert=True)
+            return
+        
+        # Удаляем связь чата с проектом
+        success = await ChatCRUD.remove_from_project(session, chat_id, active_project.id)
+        
+        if success:
+            if user.language == 'ru':
+                await callback.answer('✅ Чат удалён из мониторинга!', show_alert=True)
+            else:
+                await callback.answer('✅ Chat removed from monitoring!', show_alert=True)
+        else:
+            await callback.answer('❌ Ошибка при удалении', show_alert=True)
+    
+    # Возвращаемся к списку чатов
+    await list_chats(callback, user)
 
 
 @router.callback_query(F.data == 'chats:packs')

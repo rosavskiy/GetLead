@@ -54,18 +54,24 @@ async def get_search_client() -> Optional[TelegramClient]:
             return None
 
 
-async def search_telegram_chats(query: str, limit: int = 20) -> List[Dict[str, Any]]:
+async def search_telegram_chats(query: str, limit: int = 30) -> List[Dict[str, Any]]:
     """
-    Поиск РЕАЛЬНЫХ чатов через Telegram Global Search API
+    УМНЫЙ поиск чатов через Telegram Global Search API
+    
+    Использует messages.SearchGlobal для поиска по содержимому сообщений,
+    затем извлекает уникальные чаты и сортирует по количеству участников.
+    
+    Это находит чаты где ОБСУЖДАЮТ тему, даже если в названии нет ключевого слова!
     
     Args:
         query: Поисковый запрос
-        limit: Максимальное количество результатов
+        limit: Максимальное количество сообщений для анализа
         
     Returns:
-        Список словарей с информацией о РЕАЛЬНЫХ чатах
+        Список словарей с информацией о РЕАЛЬНЫХ чатах, отсортированный по участникам
     """
     results = []
+    seen_chat_ids = set()
     client = await get_search_client()
     
     if not client:
@@ -73,20 +79,94 @@ async def search_telegram_chats(query: str, limit: int = 20) -> List[Dict[str, A
         return []
     
     try:
-        # Глобальный поиск через Telegram API
-        search_result = await client(functions.contacts.SearchRequest(
+        from telethon.tl.types import InputMessagesFilterEmpty, InputPeerEmpty
+        from telethon.tl.functions.messages import SearchGlobalRequest
+        
+        # Глобальный поиск по сообщениям - находит чаты где обсуждают тему
+        search_result = await client(SearchGlobalRequest(
             q=query,
+            filter=InputMessagesFilterEmpty(),
+            min_date=None,
+            max_date=None,
+            offset_rate=0,
+            offset_peer=InputPeerEmpty(),
+            offset_id=0,
             limit=limit
         ))
         
+        # Собираем все чаты из результатов
+        chats_map = {c.id: c for c in search_result.chats}
+        
+        # Считаем сколько раз каждый чат встретился (релевантность)
+        chat_relevance = {}
+        for msg in search_result.messages:
+            chat_id = getattr(msg, 'peer_id', None)
+            if chat_id:
+                # Извлекаем реальный ID
+                real_id = getattr(chat_id, 'channel_id', None) or getattr(chat_id, 'chat_id', None)
+                if real_id:
+                    chat_relevance[real_id] = chat_relevance.get(real_id, 0) + 1
+        
+        # Обрабатываем найденные чаты
         for chat in search_result.chats:
             try:
-                # Получаем информацию о чате
-                if hasattr(chat, 'username') and chat.username:
-                    # Это канал или группа с username
+                if chat.id in seen_chat_ids:
+                    continue
+                seen_chat_ids.add(chat.id)
+                
+                # Только чаты с username (публичные)
+                if not hasattr(chat, 'username') or not chat.username:
+                    continue
+                
+                # Получаем количество участников
+                subscribers = getattr(chat, 'participants_count', None)
+                
+                # Определяем тип чата
+                chat_type = 'unknown'
+                if isinstance(chat, Channel):
+                    if chat.megagroup:
+                        chat_type = 'supergroup'
+                    elif chat.broadcast:
+                        chat_type = 'channel'
+                    else:
+                        chat_type = 'group'
+                
+                # Релевантность = сколько сообщений найдено в этом чате
+                relevance = chat_relevance.get(chat.id, 0)
+                
+                results.append({
+                    'username': f'@{chat.username}',
+                    'title': getattr(chat, 'title', chat.username),
+                    'link': f't.me/{chat.username}',
+                    'subscribers': subscribers,
+                    'type': chat_type,
+                    'relevance': relevance,
+                    'source': 'telegram_global_search',
+                    'verified': True
+                })
+                    
+            except Exception as e:
+                logger.warning(f"Error processing chat: {e}")
+                continue
+        
+        # Дополнительно ищем через contacts.Search (по названию)
+        try:
+            contacts_result = await client(functions.contacts.SearchRequest(
+                q=query,
+                limit=20
+            ))
+            
+            for chat in contacts_result.chats:
+                try:
+                    if chat.id in seen_chat_ids:
+                        continue
+                    seen_chat_ids.add(chat.id)
+                    
+                    if not hasattr(chat, 'username') or not chat.username:
+                        continue
+                    
                     subscribers = getattr(chat, 'participants_count', None)
                     
-                    # Определяем тип чата
                     chat_type = 'unknown'
                     if isinstance(chat, Channel):
                         if chat.megagroup:
@@ -102,21 +182,29 @@ async def search_telegram_chats(query: str, limit: int = 20) -> List[Dict[str, A
                         'link': f't.me/{chat.username}',
                         'subscribers': subscribers,
                         'type': chat_type,
-                        'source': 'telegram_search',
-                        'verified': True  # Этот чат 100% существует!
+                        'relevance': 5,  # Бонус за совпадение по названию
+                        'source': 'telegram_contacts_search',
+                        'verified': True
                     })
+                except Exception:
+                    continue
                     
-            except Exception as e:
-                logger.warning(f"Error processing chat: {e}")
-                continue
+        except Exception as e:
+            logger.warning(f"Contacts search failed: {e}")
         
-        logger.info(f"Telegram search found {len(results)} chats for '{query}'")
+        # Сортируем: сначала по релевантности, потом по подписчикам
+        results.sort(key=lambda x: (
+            -x.get('relevance', 0),
+            -(x.get('subscribers') or 0)
+        ))
+        
+        logger.info(f"Telegram smart search found {len(results)} unique chats for '{query}'")
         
     except FloodWaitError as e:
         logger.warning(f"Telegram flood wait: {e.seconds}s")
         await asyncio.sleep(min(e.seconds, 30))
     except Exception as e:
-        logger.error(f"Telegram search error: {e}")
+        logger.error(f"Telegram search error: {e}", exc_info=True)
     
     return results
 

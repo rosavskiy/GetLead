@@ -199,6 +199,42 @@ class ChatCRUD:
         if chat not in project.chats:
             project.chats.append(chat)
             await session.commit()
+    
+    @staticmethod
+    async def get_by_id(session: AsyncSession, chat_id: int) -> Optional[Chat]:
+        """Получить чат по ID"""
+        result = await session.execute(
+            select(Chat).where(Chat.id == chat_id)
+        )
+        return result.scalar_one_or_none()
+    
+    @staticmethod
+    async def remove_from_project(session: AsyncSession, chat_id: int, project_id: int) -> bool:
+        """Удалить чат из проекта"""
+        try:
+            result = await session.execute(
+                select(Project).where(Project.id == project_id).options(selectinload(Project.chats))
+            )
+            project = result.scalar_one_or_none()
+            
+            if not project:
+                return False
+            
+            result = await session.execute(select(Chat).where(Chat.id == chat_id))
+            chat = result.scalar_one_or_none()
+            
+            if not chat:
+                return False
+            
+            if chat in project.chats:
+                project.chats.remove(chat)
+                await session.commit()
+                return True
+            
+            return False
+        except Exception:
+            await session.rollback()
+            return False
 
 
 class LeadMatchCRUD:
