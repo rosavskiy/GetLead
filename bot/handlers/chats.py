@@ -4,10 +4,11 @@ from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
 import re
+from sqlalchemy import update
 
 from database.database import async_session_maker
 from database.crud import ProjectCRUD, ChatCRUD
-from database.models import User
+from database.models import User, Chat
 from bot.states import ChatStates
 from bot.texts import get_text
 from bot.keyboards import chats_menu_kb, cancel_kb, main_menu_kb, chats_list_kb, confirm_delete_chat_kb
@@ -92,22 +93,10 @@ async def process_chat_link(message: Message, user: User, state: FSMContext):
             # Чат уже существует, привязываем к проекту
             await ChatCRUD.assign_to_project(session, existing_chat.id, active_project.id)
             
-            # Сбрасываем is_joined если чат не вступлен
-            if not existing_chat.is_joined:
-                from sqlalchemy import update
-                await session.execute(
-                    update(Chat).where(Chat.id == existing_chat.id).values(is_joined=False)
-                )
-                await session.commit()
-                logger.info(f"🔄 Сброшен is_joined для чата {link}")
-            
-            # Проверяем назначен ли юзербот - если нет, назначаем
-            if not existing_chat.assigned_userbot:
-                from userbot.load_balancer import UserbotLoadBalancer
-                await UserbotLoadBalancer.assign_userbot_for_chat(session, existing_chat.id)
-                logger.info(f"✅ Назначен юзербот для существующего чата {link}")
-            else:
-                logger.info(f"ℹ️ Юзербот уже назначен: {existing_chat.assigned_userbot}")
+            # Принудительно переназначаем юзербот если он не существует или чат не вступлен
+            from userbot.load_balancer import UserbotLoadBalancer
+            await UserbotLoadBalancer.assign_userbot_for_chat(session, existing_chat.id)
+            logger.info(f"✅ Переназначен юзербот для чата {link}")
             
             text = get_text('chat_exists', user.language)
         else:
