@@ -160,7 +160,7 @@ async def start_ai_chats(callback: CallbackQuery, user: User, state: FSMContext)
 @router.message(ChatStates.waiting_for_ai_niche)
 async def process_ai_chats(message: Message, user: User, state: FSMContext):
     """Обработка AI подбора чатов"""
-    if message.text == '❌ Отмена':
+    if message.text == '❌ Отмена' or message.text == '❌ Cancel':
         await state.clear()
         await message.answer(
             get_text('main_menu', user.language),
@@ -169,38 +169,88 @@ async def process_ai_chats(message: Message, user: User, state: FSMContext):
         return
     
     niche = message.text.strip()
+    lang = user.language
     
     # Показываем сообщение о генерации
-    status_msg = await message.answer('🤖 Ищу релевантные чаты...')
+    searching_text = '🤖 Ищу релевантные чаты...' if lang == 'ru' else '🤖 Searching for relevant chats...'
+    status_msg = await message.answer(searching_text)
     
     try:
         from utils.ai_helpers import suggest_chats
         chat_suggestions = await suggest_chats(niche)
         
         if not chat_suggestions:
-            await status_msg.edit_text('❌ Не удалось найти чаты для этой ниши')
+            err_text = '❌ Не удалось найти чаты для этой ниши' if lang == 'ru' else '❌ Could not find chats for this niche'
+            await status_msg.edit_text(err_text)
             await state.clear()
             return
         
         await state.clear()
         
         # Показываем результат
-        text = f'🤖 <b>Рекомендованные чаты для ниши "{niche}":</b>\n\n'
-        for i, chat_name in enumerate(chat_suggestions[:15], 1):
-            text += f'{i}. {chat_name}\n'
+        if lang == 'ru':
+            text = f'🤖 <b>Рекомендованные чаты для ниши "{niche}":</b>\n\n'
+        else:
+            text = f'🤖 <b>Recommended chats for niche "{niche}":</b>\n\n'
         
-        text += '\n💡 <b>Как найти чаты:</b>\n'
-        text += '1. Найдите эти чаты в поиске Telegram\n'
-        text += '2. Скопируйте ссылку на чат\n'
-        text += '3. Добавьте через меню "➕ Добавить чат"\n'
-        text += '\n⚠️ Это названия для поиска, а не прямые ссылки'
+        db_chats = []
+        telemetr_chats = []
+        ai_suggestions = []
         
-        await status_msg.edit_text(text, parse_mode='HTML')
-        await message.answer('Вернуться в меню:', reply_markup=main_menu_kb(user.language))
+        for chat in chat_suggestions:
+            source = chat.get('source', 'unknown')
+            if source == 'database':
+                db_chats.append(chat)
+            elif source == 'telemetr':
+                telemetr_chats.append(chat)
+            else:
+                ai_suggestions.append(chat)
+        
+        # Чаты из базы (с прямыми ссылками)
+        if db_chats:
+            header = '📚 <b>Проверенные чаты:</b>' if lang == 'ru' else '📚 <b>Verified chats:</b>'
+            text += f'{header}\n'
+            for chat in db_chats:
+                text += f"• <a href=\"https://{chat['link']}\">{chat['username']}</a>\n"
+            text += '\n'
+        
+        # Чаты с Telemetr (с ссылками)
+        if telemetr_chats:
+            header = '🔍 <b>Найдено на Telemetr:</b>' if lang == 'ru' else '🔍 <b>Found on Telemetr:</b>'
+            text += f'{header}\n'
+            for chat in telemetr_chats:
+                text += f"• <a href=\"https://{chat['link']}\">{chat['username']}</a>\n"
+            text += '\n'
+        
+        # AI предложения (названия для поиска)
+        if ai_suggestions:
+            header = '💡 <b>Ищите в Telegram:</b>' if lang == 'ru' else '💡 <b>Search in Telegram:</b>'
+            text += f'{header}\n'
+            for chat in ai_suggestions:
+                text += f"• {chat['username']}\n"
+            text += '\n'
+        
+        if lang == 'ru':
+            text += '💡 <b>Как добавить:</b>\n'
+            text += '1. Перейдите по ссылке или найдите чат\n'
+            text += '2. Скопируйте ссылку на чат\n'
+            text += '3. Добавьте через "➕ Добавить чат"'
+        else:
+            text += '💡 <b>How to add:</b>\n'
+            text += '1. Click the link or search for the chat\n'
+            text += '2. Copy the chat link\n'
+            text += '3. Add via "➕ Add Chat"'
+        
+        await status_msg.edit_text(text, parse_mode='HTML', disable_web_page_preview=True)
+        await message.answer(
+            'Вернуться в меню:' if lang == 'ru' else 'Return to menu:', 
+            reply_markup=main_menu_kb(lang)
+        )
         
     except ValueError as e:
         await status_msg.edit_text(f'❌ Ошибка: {str(e)}')
         await state.clear()
     except Exception as e:
-        await status_msg.edit_text('❌ Произошла ошибка при поиске чатов')
+        err_text = '❌ Произошла ошибка при поиске чатов' if lang == 'ru' else '❌ Error while searching for chats'
+        await status_msg.edit_text(err_text)
         await state.clear()

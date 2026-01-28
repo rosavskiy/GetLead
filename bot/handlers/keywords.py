@@ -116,7 +116,7 @@ async def start_ai_keywords(callback: CallbackQuery, user: User, state: FSMConte
 @router.message(KeywordStates.waiting_for_ai_niche)
 async def process_ai_keywords(message: Message, user: User, state: FSMContext):
     """Обработка AI подбора ключевых слов"""
-    if message.text == '❌ Отмена':
+    if message.text == '❌ Отмена' or message.text == '❌ Cancel':
         await state.clear()
         await message.answer(
             get_text('main_menu', user.language),
@@ -125,16 +125,19 @@ async def process_ai_keywords(message: Message, user: User, state: FSMContext):
         return
     
     niche = message.text.strip()
+    lang = user.language
     
     # Показываем сообщение о генерации
-    status_msg = await message.answer('🤖 Генерирую ключевые слова...')
+    gen_text = '🤖 Генерирую ключевые слова...' if lang == 'ru' else '🤖 Generating keywords...'
+    status_msg = await message.answer(gen_text)
     
     try:
         from utils.ai_helpers import generate_keywords
         keywords = await generate_keywords(niche)
         
         if not keywords:
-            await status_msg.edit_text('❌ Не удалось сгенерировать ключевые слова')
+            err = '❌ Не удалось сгенерировать ключевые слова' if lang == 'ru' else '❌ Could not generate keywords'
+            await status_msg.edit_text(err)
             await state.clear()
             return
         
@@ -143,7 +146,8 @@ async def process_ai_keywords(message: Message, user: User, state: FSMContext):
             active_project = await ProjectCRUD.get_active(session, user.id)
             
             if not active_project:
-                await status_msg.edit_text('❌ Проект не найден!')
+                err = '❌ Проект не найден!' if lang == 'ru' else '❌ Project not found!'
+                await status_msg.edit_text(err)
                 await state.clear()
                 return
             
@@ -161,18 +165,25 @@ async def process_ai_keywords(message: Message, user: User, state: FSMContext):
         
         # Показываем результат
         keywords_preview = '\n'.join([f'• {kw}' for kw in keywords[:10]])
-        text = f'✅ <b>Добавлено {added_count} ключевых слов!</b>\n\n{keywords_preview}'
+        if lang == 'ru':
+            text = f'✅ <b>Добавлено {added_count} ключевых слов!</b>\n\n{keywords_preview}'
+        else:
+            text = f'✅ <b>Added {added_count} keywords!</b>\n\n{keywords_preview}'
+        
         if len(keywords) > 10:
-            text += f'\n\n... и ещё {len(keywords) - 10}'
+            more = f'и ещё {len(keywords) - 10}' if lang == 'ru' else f'and {len(keywords) - 10} more'
+            text += f'\n\n... {more}'
         
         await status_msg.edit_text(text, parse_mode='HTML')
-        await message.answer('Вернуться в меню:', reply_markup=main_menu_kb(user.language))
+        menu_text = 'Вернуться в меню:' if lang == 'ru' else 'Return to menu:'
+        await message.answer(menu_text, reply_markup=main_menu_kb(lang))
         
     except ValueError as e:
         await status_msg.edit_text(f'❌ Ошибка: {str(e)}')
         await state.clear()
     except Exception as e:
-        await status_msg.edit_text('❌ Произошла ошибка при генерации')
+        err = '❌ Произошла ошибка при генерации' if lang == 'ru' else '❌ Error during generation'
+        await status_msg.edit_text(err)
         await state.clear()
 
 

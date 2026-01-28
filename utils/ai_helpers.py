@@ -1,9 +1,151 @@
 """Утилиты для работы с AI"""
+import aiohttp
+import re
 from openai import AsyncOpenAI
-from typing import List
+from typing import List, Optional
 from config import settings
 
 client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY) if settings.OPENAI_API_KEY else None
+
+# Встроенная база популярных чатов по категориям (бесплатно!)
+CHAT_DATABASE = {
+    'it': [
+        '@ru_python', '@pro_python_code', '@python_scripts',
+        '@javascript_ru', '@react_js', '@vuejs_club',
+        '@devops_ru', '@docker_ru', '@kubernetes_ru',
+        '@frontend_ru', '@webdev_ru', '@css_ru',
+        '@nodejs_ru', '@golang_ru', '@rust_ru',
+        '@linux_ru', '@sysadminka', '@linux_beginners',
+        '@mobile_dev', '@android_dev', '@ios_dev',
+        '@it_freelance', '@freelance_orders_ru', '@itchats',
+    ],
+    'design': [
+        '@designchat', '@design_ru', '@uxuidesign',
+        '@figma_rus', '@photoshop_ru', '@illustrator_chat',
+        '@webdesign_ru', '@tgdesigners', '@design_jobs',
+        '@logodesigners', '@motion_design', '@3d_chat_ru',
+        '@branding_ru', '@freelance_design', '@graphic_design_ru',
+    ],
+    'marketing': [
+        '@smm_chat', '@marketing_ru', '@digital_marketing_ru',
+        '@targetolog_chat', '@context_ads', '@seo_chat_ru',
+        '@smm_jobs', '@copywriting_ru', '@content_marketing',
+        '@email_marketing', '@growth_hacking_ru', '@marketers_chat',
+        '@reklama_chat', '@influencer_marketing', '@brand_marketing',
+    ],
+    'business': [
+        '@bizforum', '@startupru', '@business_ru',
+        '@entrepreneur_chat', '@investory_ru', '@finance_chat',
+        '@startup_ideas', '@business_jobs', '@b2b_chat',
+        '@sales_chat_ru', '@ecommerce_ru', '@dropshipping_ru',
+        '@franchise_chat', '@business_networking',
+    ],
+    'real_estate': [
+        '@realty_chat', '@nedvizhimost_ru', '@arenda_chat',
+        '@ipoteka_chat', '@kvartira_chat', '@novostroyki_chat',
+        '@rieltor_chat', '@zagorodnaya_nedvizhimost',
+        '@kommercheska_nedvizhimost', '@investicii_nedvizhimost',
+    ],
+    'education': [
+        '@education_chat', '@courses_ru', '@online_education',
+        '@repetitory_chat', '@english_chat_ru', '@languages_ru',
+        '@teachers_chat', '@school_chat', '@university_chat',
+    ],
+    'crypto': [
+        '@crypto_chat_ru', '@bitcoin_ru', '@ethereum_ru',
+        '@trading_crypto', '@nft_chat_ru', '@defi_ru',
+        '@crypto_signals_ru', '@blockchain_dev',
+    ],
+    'freelance': [
+        '@freelance_orders_ru', '@fl_orders', '@freelancejob',
+        '@udalenka_chat', '@remote_work_ru', '@freelance_ru',
+        '@kwork_orders', '@work_orders_ru', '@freelance_exchange',
+    ],
+    'legal': [
+        '@lawyers_chat', '@yurist_chat', '@legal_ru',
+        '@accounting_chat', '@buhgalter_chat', '@nalog_chat',
+    ],
+    'hr': [
+        '@hr_chat_ru', '@rabota_chat', '@vacancy_chat',
+        '@headhunter_chat', '@recruiting_ru', '@hh_chat',
+    ],
+}
+
+# Маппинг ниш на категории
+NICHE_KEYWORDS = {
+    'it': ['программирование', 'разработка', 'python', 'javascript', 'web', 'веб', 'frontend', 'backend', 
+           'devops', 'мобильная', 'ios', 'android', 'it', 'software', 'код', 'developer'],
+    'design': ['дизайн', 'ui', 'ux', 'графика', 'figma', 'photoshop', 'иллюстрация', 'лого', 
+               'брендинг', '3d', 'motion', 'анимация', 'верстка'],
+    'marketing': ['маркетинг', 'smm', 'seo', 'таргет', 'реклама', 'продвижение', 'контент', 
+                  'копирайтинг', 'email', 'digital', 'трафик', 'лиды'],
+    'business': ['бизнес', 'стартап', 'предприниматель', 'инвестиции', 'финансы', 'продажи', 
+                 'b2b', 'ecommerce', 'франшиза', 'партнерство'],
+    'real_estate': ['недвижимость', 'квартира', 'аренда', 'ипотека', 'риелтор', 'новостройка', 
+                    'дом', 'коммерческая', 'загородная'],
+    'education': ['образование', 'курсы', 'обучение', 'репетитор', 'английский', 'язык', 
+                  'школа', 'университет', 'тренинг'],
+    'crypto': ['крипто', 'bitcoin', 'биткоин', 'ethereum', 'nft', 'блокчейн', 'трейдинг', 
+               'defi', 'токен'],
+    'freelance': ['фриланс', 'заказы', 'удаленка', 'удалённая', 'проекты', 'подработка'],
+    'legal': ['юрист', 'право', 'бухгалтер', 'налог', 'юридический', 'accounting'],
+    'hr': ['hr', 'кадры', 'вакансии', 'работа', 'рекрутинг', 'найм', 'резюме'],
+}
+
+
+def detect_category(niche: str) -> str:
+    """Определить категорию по нише"""
+    niche_lower = niche.lower()
+    
+    max_score = 0
+    best_category = 'freelance'  # По умолчанию
+    
+    for category, keywords in NICHE_KEYWORDS.items():
+        score = sum(1 for kw in keywords if kw in niche_lower)
+        if score > max_score:
+            max_score = score
+            best_category = category
+    
+    return best_category
+
+
+async def search_telemetr_chats(query: str) -> List[dict]:
+    """
+    Поиск чатов на Telemetr.me (бесплатный скрапинг)
+    
+    Args:
+        query: Поисковый запрос
+        
+    Returns:
+        Список словарей с информацией о чатах
+    """
+    try:
+        url = f"https://telemetr.me/channels/?q={query}"
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as response:
+                if response.status != 200:
+                    return []
+                
+                html = await response.text()
+                
+                # Извлекаем username'ы чатов
+                pattern = r'@([a-zA-Z0-9_]{5,})'
+                usernames = re.findall(pattern, html)
+                
+                # Убираем дубликаты и системные
+                seen = set()
+                result = []
+                for username in usernames:
+                    if username not in seen and not username.startswith('telemetr'):
+                        seen.add(username)
+                        result.append({'username': f'@{username}', 'link': f't.me/{username}'})
+                        if len(result) >= 15:
+                            break
+                
+                return result
+    except Exception:
+        return []
 
 
 async def generate_keywords(niche: str) -> List[str]:
@@ -91,9 +233,63 @@ async def generate_exclude_words(niche: str) -> List[str]:
     return words
 
 
-async def suggest_chats(niche: str) -> List[str]:
+async def suggest_chats(niche: str) -> List[dict]:
     """
-    Предложение названий чатов для мониторинга
+    Предложение чатов для мониторинга (гибридный подход)
+    
+    1. Определяем категорию по нише
+    2. Берём чаты из встроенной базы
+    3. Дополняем поиском на Telemetr.me
+    
+    Args:
+        niche: Описание ниши
+        
+    Returns:
+        Список словарей с информацией о чатах
+    """
+    results = []
+    
+    # 1. Определяем категорию
+    category = detect_category(niche)
+    
+    # 2. Берём из встроенной базы
+    db_chats = CHAT_DATABASE.get(category, [])
+    for chat in db_chats[:10]:
+        results.append({
+            'username': chat,
+            'link': f't.me/{chat.replace("@", "")}',
+            'source': 'database'
+        })
+    
+    # 3. Пробуем найти на Telemetr.me
+    try:
+        telemetr_chats = await search_telemetr_chats(niche)
+        for chat in telemetr_chats[:5]:
+            if chat['username'] not in [r['username'] for r in results]:
+                chat['source'] = 'telemetr'
+                results.append(chat)
+    except Exception:
+        pass  # Если скрапинг не сработал, используем только базу
+    
+    # 4. Если есть OpenAI, дополняем AI-предложениями названий
+    if client and len(results) < 10:
+        try:
+            ai_suggestions = await suggest_chat_names_ai(niche)
+            for name in ai_suggestions[:5]:
+                results.append({
+                    'username': name,
+                    'link': None,
+                    'source': 'ai_suggestion'
+                })
+        except Exception:
+            pass
+    
+    return results[:15]
+
+
+async def suggest_chat_names_ai(niche: str) -> List[str]:
+    """
+    AI предложение названий чатов для ручного поиска
     
     Args:
         niche: Описание ниши
@@ -102,26 +298,18 @@ async def suggest_chats(niche: str) -> List[str]:
         Список предполагаемых названий чатов
     """
     if not client:
-        raise ValueError("OpenAI API key не настроен")
+        return []
     
-    prompt = f"""Ты - эксперт по Telegram-сообществам.
+    prompt = f"""Дана ниша: "{niche}"
 
-Дана ниша: "{niche}"
-
-Предложи 10-15 типичных названий Telegram-чатов и каналов, где могут обсуждаться заказы/вакансии/сделки в этой нише.
+Предложи 5-7 типичных названий Telegram-чатов и каналов, где могут обсуждаться заказы/вакансии/сделки в этой нише.
 
 Названия должны быть:
-- Реалистичными (как реальные чаты)
+- Реалистичными
 - На русском языке
 - Релевантными нише
-- Разнообразными (биржи, вакансии, фриланс и т.д.)
 
-Верни ТОЛЬКО список названий, каждое с новой строки, без @, без пояснений.
-
-Пример формата:
-Фриланс Заказы
-IT Вакансии
-Работа для дизайнеров"""
+Верни ТОЛЬКО список названий, каждое с новой строки, без @, без пояснений."""
 
     response = await client.chat.completions.create(
         model="gpt-4o-mini",
@@ -130,7 +318,7 @@ IT Вакансии
             {"role": "user", "content": prompt}
         ],
         temperature=0.7,
-        max_tokens=400
+        max_tokens=300
     )
     
     chats_text = response.choices[0].message.content.strip()
