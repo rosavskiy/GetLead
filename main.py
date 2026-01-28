@@ -40,9 +40,9 @@ async def set_bot_commands(bot: Bot):
         BotCommand(command="profile", description="👤 Личный кабинет"),
         BotCommand(command="projects", description="📁 Мои проекты"),
         BotCommand(command="stats", description="📊 Статистика"),
-        BotCommand(command="admin", description="⚙️ Админ-панель"),
-        BotCommand(command="broadcast", description="📢 Рассылка"),
-        BotCommand(command="users", description="👥 Пользователи"),
+        BotCommand(command="admin_stats", description="📊 Статистика юзерботов"),
+        BotCommand(command="admin_rebalance", description="🔄 Ребалансировка чатов"),
+        BotCommand(command="admin_limits", description="⚙️ Лимиты системы"),
         BotCommand(command="help", description="❓ Помощь"),
         BotCommand(command="language", description="🌐 Сменить язык"),
     ]
