@@ -211,6 +211,9 @@ class ChatCRUD:
     @staticmethod
     async def remove_from_project(session: AsyncSession, chat_id: int, project_id: int) -> bool:
         """Удалить чат из проекта. Если чат больше не привязан ни к одному проекту - удаляем из БД"""
+        import logging
+        logger = logging.getLogger(__name__)
+        
         try:
             result = await session.execute(
                 select(Project).where(Project.id == project_id).options(selectinload(Project.chats))
@@ -218,6 +221,7 @@ class ChatCRUD:
             project = result.scalar_one_or_none()
             
             if not project:
+                logger.warning(f"Проект {project_id} не найден")
                 return False
             
             result = await session.execute(
@@ -226,7 +230,10 @@ class ChatCRUD:
             chat = result.scalar_one_or_none()
             
             if not chat:
+                logger.warning(f"Чат {chat_id} не найден")
                 return False
+            
+            logger.info(f"Удаление чата {chat.telegram_link} из проекта {project.name}")
             
             if chat in project.chats:
                 project.chats.remove(chat)
@@ -237,13 +244,17 @@ class ChatCRUD:
                 
                 # Если чат больше не привязан ни к одному проекту - удаляем из БД
                 if not chat.projects:
+                    logger.info(f"Чат {chat.telegram_link} больше не привязан к проектам, удаляем из БД")
                     await session.delete(chat)
                     await session.commit()
+                    logger.info(f"Чат {chat.telegram_link} удалён из БД")
                 
                 return True
             
+            logger.warning(f"Чат {chat_id} не привязан к проекту {project_id}")
             return False
-        except Exception:
+        except Exception as e:
+            logger.error(f"Ошибка удаления чата: {e}", exc_info=True)
             await session.rollback()
             return False
 
