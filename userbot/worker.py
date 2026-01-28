@@ -48,13 +48,15 @@ class UserbotWorker:
         await self.client.start(phone=self.phone)
         logger.info(f"✅ Юзербот {self.session_name} запущен!")
         
-        # Загружаем список чатов для мониторинга
-        await self.load_chats()
-        
-        # Регистрируем обработчик новых сообщений
-        @self.client.on(events.NewMessage)
+        # Регистрируем обработчик новых сообщений СРАЗУ после старта
+        @self.client.on(events.NewMessage(incoming=True))
         async def handle_new_message(event):
             await self.process_message(event)
+        
+        logger.info(f"📡 Обработчик NewMessage зарегистрирован")
+        
+        # Загружаем список чатов для мониторинга
+        await self.load_chats()
         
         # Запускаем фоновую задачу проверки новых чатов
         asyncio.create_task(self.check_new_chats_periodically())
@@ -314,19 +316,22 @@ class UserbotWorker:
             chat_id = event.chat_id
             is_monitored = chat_id in self.monitored_chats
             
+            # Логируем ВСЕ входящие события для отладки
+            logger.debug(f"🔔 NewMessage event: chat_id={chat_id}, monitored={is_monitored}, monitored_chats={self.monitored_chats}")
+            
             # Проверяем, что сообщение из мониторируемого чата
             if not is_monitored:
-                # Не спамим логами о немониторируемых чатах
                 return
             
             # Получаем текст сообщения
             text = event.message.message
             if not text:
+                logger.debug(f"⏭️ Пустое сообщение в чате {chat_id}")
                 return
             
             # Игнорируем свои сообщения
             is_outgoing = event.message.out
-            logger.info(f"📨 Сообщение в мониторируемом чате {chat_id}: '{text[:80]}...', out={is_outgoing}")
+            logger.info(f"📨 Сообщение в мониторируемом чате {chat_id}: '{text[:80]}', out={is_outgoing}")
             
             if is_outgoing:
                 logger.info(f"⏭️ Пропускаем свое сообщение")
