@@ -223,7 +223,11 @@ async def show_packed_chats(callback: CallbackQuery, user: User):
 
 📢 Чтобы добавить пакет, напишите в поддержку: /support"""
     
-    await callback.message.answer(text, parse_mode='HTML')
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    builder = InlineKeyboardBuilder()
+    builder.button(text=get_text('btn_back', user.language), callback_data='menu:chats')
+    
+    await callback.message.answer(text, parse_mode='HTML', reply_markup=builder.as_markup())
     await callback.answer()
 
 
