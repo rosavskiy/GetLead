@@ -202,8 +202,8 @@ async def confirm_delete_chat(callback: CallbackQuery, user: User):
             # Отправляем сигнал reload юзерботу
             try:
                 import redis.asyncio as redis
-                from config import REDIS_URL
-                redis_client = redis.from_url(REDIS_URL)
+                from config import settings
+                redis_client = redis.from_url(settings.REDIS_URL)
                 await redis_client.publish('userbot_control', 'reload')
                 await redis_client.close()
             except Exception as e:
