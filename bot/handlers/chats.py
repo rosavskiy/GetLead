@@ -35,7 +35,10 @@ async def show_chats_menu(callback: CallbackQuery, user: User):
         for chat in active_project.chats[:10]:
             status = '✅' if chat.is_joined else '⏳'
             title = chat.title or chat.telegram_link
-            text += f'{status} {title}\n'
+            link = chat.telegram_link or f't.me/c/{chat.telegram_id}'
+            if not link.startswith('http'):
+                link = f'https://{link}'
+            text += f'{status} <a href="{link}">{title}</a>\n'
         if len(active_project.chats) > 10:
             text += f'\n... и еще {len(active_project.chats) - 10}'
     
@@ -196,6 +199,16 @@ async def confirm_delete_chat(callback: CallbackQuery, user: User):
         success = await ChatCRUD.remove_from_project(session, chat_id, active_project.id)
         
         if success:
+            # Отправляем сигнал reload юзерботу
+            try:
+                import redis.asyncio as redis
+                from config import REDIS_URL
+                redis_client = redis.from_url(REDIS_URL)
+                await redis_client.publish('userbot_control', 'reload')
+                await redis_client.close()
+            except Exception as e:
+                logger.warning(f'Failed to send reload signal: {e}')
+            
             if user.language == 'ru':
                 await callback.answer('✅ Чат удалён из мониторинга!', show_alert=True)
             else:
